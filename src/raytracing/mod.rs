@@ -2,6 +2,7 @@ use bevy::{
     core_pipeline::{
         core_3d::graph::{Core3d, Node3d},
         fullscreen_vertex_shader::fullscreen_shader_vertex_state,
+        prepass::ViewPrepassTextures,
     },
     ecs::query::QueryItem,
     prelude::*,
@@ -40,6 +41,7 @@ impl Plugin for RayTracePlugin {
             // This plugin will prepare the component for the GPU by creating a uniform buffer
             // and writing the data to that buffer every frame.
             UniformComponentPlugin::<RayTraceLevelExtract>::default(),
+            UniformComponentPlugin::<CameraExtract>::default(),
         ));
 
         // We need to get the render app from the main app
@@ -103,17 +105,30 @@ pub enum RayTracing {
 
 // Turning the marker into something the GPU can use
 impl ExtractComponent for RayTracing {
-    type QueryData = &'static RayTracing;
+    type QueryData = (&'static RayTracing, &'static Projection);
 
     type QueryFilter = ();
 
-    type Out = RayTraceLevelExtract;
+    type Out = (RayTraceLevelExtract, CameraExtract);
 
     fn extract_component(item: QueryItem<'_, Self::QueryData>) -> Option<Self::Out> {
-        let inner = RayTraceLevelExtract {
-            level: *item as u32,
+        let camera = match *item.1 {
+            Projection::Perspective(PerspectiveProjection { near, far, .. }) => CameraExtract {
+                projection: 0,
+                near,
+                far,
+            },
+            Projection::Orthographic(OrthographicProjection { near, far, .. }) => CameraExtract {
+                projection: 0,
+                near,
+                far,
+            },
         };
-        Some(inner)
+
+        let level = RayTraceLevelExtract {
+            level: *item.0 as u32,
+        };
+        Some((level, camera))
     }
 }
 
@@ -130,6 +145,14 @@ struct PostProcessLabel;
 #[derive(Default)]
 struct RayTracingNode;
 
+#[derive(Component, Default, Clone, Copy, ShaderType)]
+pub struct CameraExtract {
+    // 0 -> perspective; 1 -> orthographic
+    projection: u32,
+    near: f32,
+    far: f32,
+}
+
 // The ViewNode trait is required by the ViewNodeRunner
 impl ViewNode for RayTracingNode {
     // The node needs a query to gather data from the ECS in order to do its rendering,
@@ -138,10 +161,15 @@ impl ViewNode for RayTracingNode {
     // This query will only run on the view entity
     type ViewQuery = (
         &'static ViewTarget,
+        // The Prepass textures (depth used for blending between raster and raytraced)
+        &'static ViewPrepassTextures,
         // This makes sure the node only runs on cameras with the PostProcessSettings component
         &'static RayTraceLevelExtract,
         // As there could be multiple post processing components sent to the GPU (one per camera),
         // we need to get the index of the one that is associated with the current view.
+        &'static DynamicUniformIndex<RayTraceLevelExtract>,
+        // The camera data
+        &'static CameraExtract,
         &'static DynamicUniformIndex<RayTraceLevelExtract>,
     );
 
@@ -156,7 +184,9 @@ impl ViewNode for RayTracingNode {
         &self,
         _graph: &mut RenderGraphContext,
         render_context: &mut RenderContext,
-        (view_target, _post_process_settings, settings_index): QueryItem<Self::ViewQuery>,
+        (view_target, prepass_textures, _raytrace_level, settings_index, _camera, camera_index): QueryItem<
+            Self::ViewQuery,
+        >,
         world: &World,
     ) -> Result<(), NodeRunError> {
         // Get the pipeline resource that contains the global data we need
@@ -180,6 +210,12 @@ impl ViewNode for RayTracingNode {
             return Ok(());
         };
 
+        // Get the camera uniform binding
+        let camera_uniforms = world.resource::<ComponentUniforms<CameraExtract>>();
+        let Some(camera_binding) = camera_uniforms.uniforms().binding() else {
+            return Ok(());
+        };
+
         // This will start a new "post process write", obtaining two texture
         // views from the view target - a `source` and a `destination`.
         // `source` is the "current" main texture and you _must_ write into
@@ -188,6 +224,10 @@ impl ViewNode for RayTracingNode {
         // texture to the `destination` texture. Failing to do so will cause
         // the current main texture information to be lost.
         let post_process = view_target.post_process_write();
+
+        let Some(prepass) = prepass_textures.depth_view() else {
+            return Ok(());
+        };
 
         // The bind_group gets created each frame.
         //
@@ -205,8 +245,12 @@ impl ViewNode for RayTracingNode {
                 post_process.source,
                 // Use the sampler created for the pipeline
                 &raytrace_pipeline.sampler,
+                prepass,
+                &raytrace_pipeline.depth_sampler,
                 // Set the settings binding
                 settings_binding.clone(),
+                // Camera data
+                camera_binding.clone(),
             )),
         );
 
@@ -231,7 +275,11 @@ impl ViewNode for RayTracingNode {
         // By passing in the index of the post process settings on this view, we ensure
         // that in the event that multiple settings were sent to the GPU (as would be the
         // case with multiple cameras), we use the correct one.
-        render_pass.set_bind_group(0, &bind_group, &[settings_index.index()]);
+        render_pass.set_bind_group(
+            0,
+            &bind_group,
+            &[settings_index.index(), camera_index.index()],
+        );
         render_pass.draw(0..3, 0..1);
 
         Ok(())
@@ -243,6 +291,7 @@ impl ViewNode for RayTracingNode {
 struct RaytracingPipeline {
     layout: BindGroupLayout,
     sampler: Sampler,
+    depth_sampler: Sampler,
     pipeline_id: CachedRenderPipelineId,
 }
 
@@ -261,14 +310,21 @@ impl FromWorld for RaytracingPipeline {
                     texture_2d(TextureSampleType::Float { filterable: true }),
                     // The sampler that will be used to sample the screen texture
                     sampler(SamplerBindingType::Filtering),
-                    // The settings uniform that will control the effect
+                    // The depth texture
+                    texture_2d(TextureSampleType::Depth),
+                    // The sampler that will be used to sample the depth texture
+                    sampler(SamplerBindingType::NonFiltering),
+                    // The Level uniform that will control the blending
                     uniform_buffer::<RayTraceLevelExtract>(true),
+                    // The camera uniform
+                    uniform_buffer::<CameraExtract>(true),
                 ),
             ),
         );
 
         // We can create the sampler here since it won't change at runtime and doesn't depend on the view
         let sampler = render_device.create_sampler(&SamplerDescriptor::default());
+        let depth_sampler = render_device.create_sampler(&SamplerDescriptor::default());
 
         // Get the shader handle
         let shader = world.load_asset("shaders/raytrace.wgsl");
@@ -277,7 +333,7 @@ impl FromWorld for RaytracingPipeline {
             .resource_mut::<PipelineCache>()
             // This will add the pipeline to the cache and queue it's creation
             .queue_render_pipeline(RenderPipelineDescriptor {
-                label: Some("post_process_pipeline".into()),
+                label: Some("raytrace_pipeline".into()),
                 layout: vec![layout.clone()],
                 // This will setup a fullscreen triangle for the vertex state
                 vertex: fullscreen_shader_vertex_state(),
@@ -304,6 +360,7 @@ impl FromWorld for RaytracingPipeline {
         Self {
             layout,
             sampler,
+            depth_sampler,
             pipeline_id,
         }
     }

@@ -29,9 +29,11 @@ fn setup(
         },
         // Add the setting to the camera.
         // This component is also used to determine on which camera to run the post processing effect.
-        RayTracing::Pure,
+        RayTracing::Combined,
         DepthPrepass,
     ));
+
+    commands.insert_resource(Msaa::Off);
 
     // cube
     commands.spawn((PbrBundle {
@@ -40,14 +42,13 @@ fn setup(
         transform: Transform::from_xyz(0.0, 0.5, 0.0),
         ..default()
     },));
-    /*
-        // light
-        commands.spawn(DirectionalLightBundle {
-            directional_light: DirectionalLight {
-                illuminance: 1_000.,
-                ..default()
-            },
+
+    // light
+    commands.spawn(DirectionalLightBundle {
+        directional_light: DirectionalLight {
+            illuminance: 1_000.,
             ..default()
-        });
-    */
+        },
+        ..default()
+    });
 }
