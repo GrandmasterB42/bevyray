@@ -55,7 +55,7 @@ fn fragment(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
     let raytrace_result = raytrace();
         
     // combine option
-    if settings.level == 1 {
+    if settings.level == 1 || settings.level == 2 {
         let depth_sample = 1.0 - textureSample(depth_texture, depth_sampler, in.uv);
 
         var rasterized_depth: f32 = 0.0;
@@ -77,6 +77,14 @@ fn fragment(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
 }
 
 fn raytrace() -> RayTraceResult {
+    var fallback_far: f32;
+
+    if settings.level == 1 {
+        fallback_far = camera.far * 2.0;
+    } else {
+        fallback_far = camera.far - 1.0;
+    }
+
     return RayTraceResult(
         vec4<f32>(
             1.0,
@@ -84,6 +92,6 @@ fn raytrace() -> RayTraceResult {
             0.0,
             1.0,
         ),
-        camera.far - 1.0,
+        fallback_far,
     );
 }

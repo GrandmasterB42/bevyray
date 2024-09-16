@@ -29,8 +29,7 @@ fn setup(
         },
         // Add the setting to the camera.
         // This component is also used to determine on which camera to run the post processing effect.
-        RayTracing::Combined,
-        DepthPrepass,
+        RayTracing::FallbackRaytraced,
     ));
 
     commands.insert_resource(Msaa::Off);
