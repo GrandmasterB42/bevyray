@@ -39,7 +39,7 @@ impl ExtractComponent for RayTracing {
                 far,
             },
             Projection::Orthographic(OrthographicProjection { near, far, .. }) => CameraExtract {
-                projection: 0,
+                projection: 1,
                 near,
                 far,
             },
