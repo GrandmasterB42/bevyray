@@ -170,7 +170,7 @@ impl ViewNode for RayTracingNode {
         &'static DynamicUniformIndex<RayTraceLevelExtract>,
         // The camera data
         &'static CameraExtract,
-        &'static DynamicUniformIndex<RayTraceLevelExtract>,
+        &'static DynamicUniformIndex<CameraExtract>,
     );
 
     // Runs the node logic
@@ -301,7 +301,7 @@ impl FromWorld for RaytracingPipeline {
 
         // We need to define the bind group layout used for our pipeline
         let layout = render_device.create_bind_group_layout(
-            "post_process_bind_group_layout",
+            "raytrace_bind_group_layout",
             &BindGroupLayoutEntries::sequential(
                 // The layout entries will only be visible in the fragment stage
                 ShaderStages::FRAGMENT,

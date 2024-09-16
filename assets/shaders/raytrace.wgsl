@@ -34,7 +34,6 @@ struct RayTraceResult {
 }
 
 @group(0) @binding(5) var<uniform> camera: Camera;
-
 struct Camera {
     // 0 -> perspective; 1 -> orthographic
     projection_type: u32,
@@ -53,15 +52,7 @@ fn fragment(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
     }
 
 
-    let raytrace_result = RayTraceResult(
-        vec4<f32>(
-            1.0,
-            0.0,
-            0.0,
-            1.0,
-        ),
-        camera.far - 0.1,
-    );
+    let raytrace_result = raytrace();
         
     // combine option
     if settings.level == 1 {
@@ -83,4 +74,16 @@ fn fragment(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
     }
 
     return raytrace_result.color;
+}
+
+fn raytrace() -> RayTraceResult {
+    return RayTraceResult(
+        vec4<f32>(
+            1.0,
+            0.0,
+            0.0,
+            1.0,
+        ),
+        camera.far - 1.0,
+    );
 }
