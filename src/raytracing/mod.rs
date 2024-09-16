@@ -37,6 +37,9 @@ impl Plugin for RayTracePlugin {
             UniformComponentPlugin::<RayTraceLevelExtract>::default(),
             UniformComponentPlugin::<CameraExtract>::default(),
         ))
+        // TODO: Investigate how to make this Msaa compatible
+        .insert_resource(Msaa::Off)
+        .register_type::<RayTracing>()
         .add_systems(Update, auto_add_depth_prepass);
 
         // We need to get the render app from the main app
@@ -89,7 +92,7 @@ impl Plugin for RayTracePlugin {
 
 // This is a marker component that specifies the raytracing level for a camera
 #[repr(u32)]
-#[derive(Component, Clone, Copy)]
+#[derive(Component, Reflect, Clone, Copy)]
 pub enum RayTracing {
     Skip,
     FallbackRaster,

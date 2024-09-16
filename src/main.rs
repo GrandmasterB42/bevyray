@@ -1,12 +1,23 @@
 use bevy::prelude::*;
+use bevy_inspector_egui::quick::WorldInspectorPlugin;
+
+use bevy_mod_picking::DefaultPickingPlugins;
+use bevy_transform_gizmo::TransformGizmoPlugin;
 use raytracing::{RayTracePlugin, RayTracing};
 
 mod raytracing;
 
 fn main() {
     App::new()
-        .add_plugins((DefaultPlugins, RayTracePlugin))
+        .add_plugins((
+            DefaultPlugins,
+            RayTracePlugin,
+            WorldInspectorPlugin::new(),
+            DefaultPickingPlugins,
+            TransformGizmoPlugin::default(),
+        ))
         .add_systems(Startup, setup)
+        .add_systems(Last, remove_transform_gizmo_clear)
         .run();
 }
 
@@ -27,20 +38,22 @@ fn setup(
             },
             ..default()
         },
-        // Add the setting to the camera.
-        // This component is also used to determine on which camera to run the post processing effect.
+        Name::new("Raytraced Camera"),
         RayTracing::FallbackRaytraced,
+        bevy_transform_gizmo::GizmoPickSource::default(),
     ));
 
-    commands.insert_resource(Msaa::Off);
-
     // cube
-    commands.spawn((PbrBundle {
-        mesh: meshes.add(Cuboid::default()),
-        material: materials.add(Color::srgb(0.8, 0.7, 0.6)),
-        transform: Transform::from_xyz(0.0, 0.5, 0.0),
-        ..default()
-    },));
+    commands.spawn((
+        PbrBundle {
+            mesh: meshes.add(Cuboid::default()),
+            material: materials.add(Color::srgb(0.8, 0.7, 0.6)),
+            transform: Transform::from_xyz(0.0, 0.5, 0.0),
+            ..default()
+        },
+        bevy_mod_picking::PickableBundle::default(),
+        bevy_transform_gizmo::GizmoTransformable,
+    ));
 
     // light
     commands.spawn(DirectionalLightBundle {
@@ -50,4 +63,21 @@ fn setup(
         },
         ..default()
     });
+}
+
+// The gizmo camera copies the main camera, but the clear color messes up the modified render pipeline
+fn remove_transform_gizmo_clear(
+    mut gizmo_cam: Query<
+        &mut Camera,
+        (
+            With<bevy_transform_gizmo::InternalGizmoCamera>,
+            Without<bevy_transform_gizmo::GizmoPickSource>,
+        ),
+    >,
+) {
+    let Ok(mut gizmo_cam) = gizmo_cam.get_single_mut() else {
+        return;
+    };
+
+    gizmo_cam.clear_color = ClearColorConfig::None;
 }

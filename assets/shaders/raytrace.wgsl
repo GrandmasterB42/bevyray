@@ -46,11 +46,8 @@ fn fragment(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
     let depth_sample = textureSample(depth_texture, depth_sampler, in.uv);
     // Skip Raytracing
     if settings.level == 0 {
-        return vec4<f32>(
-            textureSample(screen_texture, texture_sampler, in.uv).rgba,
-        );
+        return textureSample(screen_texture, texture_sampler, in.uv);
     }
-
 
     let raytrace_result = raytrace();
         
