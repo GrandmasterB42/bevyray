@@ -3,7 +3,7 @@ use bevy_inspector_egui::quick::WorldInspectorPlugin;
 
 use bevy_mod_picking::DefaultPickingPlugins;
 use bevy_transform_gizmo::TransformGizmoPlugin;
-use raytracing::{RayTracePlugin, RayTracing};
+use raytracing::{RayTracePlugin, RayTracing, RaytracedSphere};
 
 mod raytracing;
 
@@ -54,6 +54,16 @@ fn setup(
         bevy_mod_picking::PickableBundle::default(),
         bevy_transform_gizmo::GizmoTransformable,
     ));
+
+    // Sphere
+    commands.spawn(RaytracedSphere {
+        position: Vec3 {
+            x: 0.0,
+            y: 0.5,
+            z: 0.0,
+        },
+        radius: 1.2,
+    });
 
     // light
     commands.spawn(DirectionalLightBundle {

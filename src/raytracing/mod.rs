@@ -9,12 +9,17 @@ use bevy::{
     render::{
         extract_component::{ExtractComponentPlugin, UniformComponentPlugin},
         render_graph::{RenderGraphApp, RenderLabel, ViewNodeRunner},
-        RenderApp,
+        Render, RenderApp, RenderSet,
     },
 };
-use pipeline::{CameraExtract, RayTraceLevelExtract, RayTracingNode, RaytracingPipeline};
+use pipeline::{
+    prepare_geometry_buffer, CameraExtract, GeometryBuffer, RayTraceLevelExtract, RayTracingNode,
+    RaytracingPipeline,
+};
 
 mod pipeline;
+
+pub use pipeline::RaytracedSphere;
 
 #[derive(Debug, Hash, PartialEq, Eq, Clone, RenderLabel)]
 struct RayTraceLabel;
@@ -31,12 +36,16 @@ impl Plugin for RayTracePlugin {
             // It's important to derive [`ExtractComponent`] on [`PostProcessingSettings`]
             // for this plugin to work correctly.
             ExtractComponentPlugin::<RayTracing>::default(),
+            // Extracting the Geometry from the main world
+            ExtractComponentPlugin::<RaytracedSphere>::default(),
             // The settings will also be the data used in the shader.
             // This plugin will prepare the component for the GPU by creating a uniform buffer
             // and writing the data to that buffer every frame.
             UniformComponentPlugin::<RayTraceLevelExtract>::default(),
             UniformComponentPlugin::<CameraExtract>::default(),
         ))
+        // Buffer used to send Raytraced Geometry to the GPU
+        .init_resource::<GeometryBuffer>()
         // TODO: Investigate how to make this Msaa compatible
         .insert_resource(Msaa::Off)
         .register_type::<RayTracing>()
@@ -61,6 +70,11 @@ impl Plugin for RayTracePlugin {
             //
             // The [`ViewNodeRunner`] is a special [`Node`] that will automatically run the node for each view
             // matching the [`ViewQuery`]
+            .init_resource::<GeometryBuffer>()
+            .add_systems(
+                Render,
+                prepare_geometry_buffer.in_set(RenderSet::PrepareResources),
+            )
             .add_render_graph_node::<ViewNodeRunner<RayTracingNode>>(
                 // Specify the label of the graph, in this case we want the graph for 3d
                 Core3d, // It also needs the label of the node

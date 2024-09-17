@@ -9,13 +9,14 @@ use bevy::{
         render_graph::{NodeRunError, RenderGraphContext, ViewNode},
         render_resource::{
             binding_types::{sampler, texture_2d, uniform_buffer},
-            BindGroupEntries, BindGroupLayout, BindGroupLayoutEntries, CachedRenderPipelineId,
-            ColorTargetState, ColorWrites, FragmentState, MultisampleState, Operations,
-            PipelineCache, PrimitiveState, RenderPassColorAttachment, RenderPassDescriptor,
-            RenderPipelineDescriptor, Sampler, SamplerBindingType, SamplerDescriptor, ShaderStages,
-            ShaderType, TextureFormat, TextureSampleType,
+            BindGroupEntries, BindGroupLayout, BindGroupLayoutEntries, BindingType,
+            BufferBindingType, CachedRenderPipelineId, ColorTargetState, ColorWrites,
+            FragmentState, MultisampleState, Operations, PipelineCache, PrimitiveState,
+            RenderPassColorAttachment, RenderPassDescriptor, RenderPipelineDescriptor, Sampler,
+            SamplerBindingType, SamplerDescriptor, ShaderStages, ShaderType, StorageBuffer,
+            TextureFormat, TextureSampleType,
         },
-        renderer::{RenderContext, RenderDevice},
+        renderer::{RenderContext, RenderDevice, RenderQueue},
         texture::BevyDefault,
         view::ViewTarget,
     },
@@ -33,15 +34,25 @@ impl ExtractComponent for RayTracing {
 
     fn extract_component(item: QueryItem<'_, Self::QueryData>) -> Option<Self::Out> {
         let camera = match *item.1 {
-            Projection::Perspective(PerspectiveProjection { near, far, .. }) => CameraExtract {
+            Projection::Perspective(PerspectiveProjection {
+                fov,
+                aspect_ratio,
+                near,
+                far,
+            }) => CameraExtract {
                 projection: 0,
                 near,
                 far,
+                aspect: aspect_ratio,
+                fov,
             },
+            // Currently unsupported
             Projection::Orthographic(OrthographicProjection { near, far, .. }) => CameraExtract {
                 projection: 1,
                 near,
                 far,
+                fov: 0.0,
+                aspect: 0.0,
             },
         };
 
@@ -60,10 +71,39 @@ pub struct RayTraceLevelExtract {
 
 #[derive(Component, Default, Clone, Copy, ShaderType)]
 pub struct CameraExtract {
-    // 0 -> perspective; 1 -> orthographic
+    // 0 -> perspective; rest not supported
     projection: u32,
     near: f32,
     far: f32,
+    fov: f32,
+    // width / height
+    aspect: f32,
+}
+
+#[derive(Clone, Component, ExtractComponent, ShaderType)]
+pub struct RaytracedSphere {
+    pub position: Vec3,
+    pub radius: f32,
+}
+
+#[derive(Resource, Default)]
+// This seems dumb
+pub struct GeometryBuffer(std::sync::Mutex<StorageBuffer<Vec<RaytracedSphere>>>);
+
+pub fn prepare_geometry_buffer(
+    geometry: ResMut<GeometryBuffer>,
+    spheres: Query<(&RaytracedSphere,)>,
+) {
+    let all_spheres = spheres
+        .iter()
+        .map(|(sphere,)| sphere.clone())
+        .collect::<Vec<_>>();
+
+    let Ok(mut buffer) = geometry.0.lock() else {
+        return;
+    };
+
+    buffer.set(all_spheres);
 }
 
 // The post process node used for the render graph
@@ -146,6 +186,23 @@ impl ViewNode for RayTracingNode {
             return Ok(());
         };
 
+        let geometry = world.resource::<GeometryBuffer>();
+        let mut geometry_buffer = geometry
+            .0
+            .lock()
+            .expect("Could not get buffer out of mutex");
+
+        let render_device = render_context.render_device();
+        {
+            let render_queue = world.resource::<RenderQueue>();
+
+            geometry_buffer.write_buffer(render_device, render_queue);
+        }
+
+        let Some(geometry_buffer_binding) = geometry_buffer.binding() else {
+            return Ok(());
+        };
+
         // The bind_group gets created each frame.
         //
         // Normally, you would create a bind_group in the Queue set,
@@ -153,7 +210,7 @@ impl ViewNode for RayTracingNode {
         // The reason it doesn't work is because each post_process_write will alternate the source/destination.
         // The only way to have the correct source/destination for the bind_group
         // is to make sure you get it during the node execution.
-        let bind_group = render_context.render_device().create_bind_group(
+        let bind_group = render_device.create_bind_group(
             "raytrace_bind_group",
             &raytrace_pipeline.layout,
             // It's important for this to match the BindGroupLayout defined in the PostProcessPipeline
@@ -169,6 +226,12 @@ impl ViewNode for RayTracingNode {
                 // Camera data
                 camera_binding.clone(),
             )),
+        );
+
+        let geometry_bind_group = render_device.create_bind_group(
+            "raytrace_geometry_bind_group",
+            &raytrace_pipeline.geometry_layout,
+            &BindGroupEntries::sequential((geometry_buffer_binding,)),
         );
 
         // Begin the render pass
@@ -197,6 +260,7 @@ impl ViewNode for RayTracingNode {
             &bind_group,
             &[settings_index.index(), camera_index.index()],
         );
+        render_pass.set_bind_group(1, &geometry_bind_group, &[]);
         render_pass.draw(0..3, 0..1);
 
         Ok(())
@@ -207,6 +271,7 @@ impl ViewNode for RayTracingNode {
 #[derive(Resource)]
 pub struct RaytracingPipeline {
     layout: BindGroupLayout,
+    geometry_layout: BindGroupLayout,
     sampler: Sampler,
     depth_sampler: Sampler,
     pipeline_id: CachedRenderPipelineId,
@@ -239,6 +304,22 @@ impl FromWorld for RaytracingPipeline {
             ),
         );
 
+        let geometry_layout = render_device.create_bind_group_layout(
+            "raytrace_geometry_bind_group_layout",
+            &BindGroupLayoutEntries::sequential(
+                // The layout entries will only be visible in the fragment stage
+                ShaderStages::FRAGMENT,
+                (
+                    // the geometry buffer
+                    BindingType::Buffer {
+                        ty: BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                ),
+            ),
+        );
+
         // We can create the sampler here since it won't change at runtime and doesn't depend on the view
         let sampler = render_device.create_sampler(&SamplerDescriptor::default());
         let depth_sampler = render_device.create_sampler(&SamplerDescriptor::default());
@@ -251,7 +332,7 @@ impl FromWorld for RaytracingPipeline {
             // This will add the pipeline to the cache and queue it's creation
             .queue_render_pipeline(RenderPipelineDescriptor {
                 label: Some("raytrace_pipeline".into()),
-                layout: vec![layout.clone()],
+                layout: vec![layout.clone(), geometry_layout.clone()],
                 // This will setup a fullscreen triangle for the vertex state
                 vertex: fullscreen_shader_vertex_state(),
                 fragment: Some(FragmentState {
@@ -266,8 +347,6 @@ impl FromWorld for RaytracingPipeline {
                         write_mask: ColorWrites::ALL,
                     })],
                 }),
-                // All of the following properties are not important for this effect so just use the default values.
-                // This struct doesn't have the Default trait implemented because not all field can have a default value.
                 primitive: PrimitiveState::default(),
                 depth_stencil: None,
                 multisample: MultisampleState::default(),
@@ -276,6 +355,7 @@ impl FromWorld for RaytracingPipeline {
 
         Self {
             layout,
+            geometry_layout,
             sampler,
             depth_sampler,
             pipeline_id,

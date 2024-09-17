@@ -39,6 +39,14 @@ struct Camera {
     projection_type: u32,
     near: f32,
     far: f32,
+    fov: f32,
+    aspect: f32,
+}
+
+@group(1) @binding(0) var<storage, read_write> geometry: array<Sphere>;
+struct Sphere {
+    position: vec3<f32>,
+    radius: f32,
 }
 
 @fragment
@@ -49,7 +57,7 @@ fn fragment(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
         return textureSample(screen_texture, texture_sampler, in.uv);
     }
 
-    let raytrace_result = raytrace();
+    let raytrace_result = raytrace(in.uv);
         
     // combine option
     if settings.level == 1 || settings.level == 2 {
@@ -59,9 +67,13 @@ fn fragment(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
         if camera.projection_type == 0 {
             rasterized_depth = (camera.near * camera.far) / (camera.far - depth_sample * (camera.far - camera.near));
         } else {
-            rasterized_depth = camera.near + depth_sample * (camera.far - camera.near);
+            return vec4<f32>(
+                1.0,
+                0.0,
+                0.0,
+                1.0,
+            );
         }
-
 
         if rasterized_depth < raytrace_result.depth {
             return textureSample(screen_texture, texture_sampler, in.uv);
@@ -73,22 +85,71 @@ fn fragment(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
     return raytrace_result.color;
 }
 
-fn raytrace() -> RayTraceResult {
-    var fallback_far: f32;
 
+struct Ray {
+    origin: vec3<f32>,
+    direction: vec3<f32>,
+}
+
+fn ray_from_uv(uv: vec2<f32>) -> Ray {
+    let ndc_x = uv.x * 2.0 - 1.0;
+    let ndc_y = 1.0 - uv.y * 2.0;
+
+    // up and direction need to be passed in the uniform
+    let camera_direction = vec3<f32>(0.0, 0.0, -1.0);
+    let camera_up = vec3<f32>(0.0, 1.0, 0.0);
+
+    let right = normalize(cross(camera_direction, camera_up));
+    let up = normalize(cross(right, camera_direction));
+
+    let scale = tan(camera.fov * 0.5);
+    let ray_direction = normalize(camera_direction + ndc_x * camera.aspect * scale * right + ndc_y * scale * up);
+
+    return Ray(vec3<f32>(0.0, 0.0, 5.0), ray_direction);
+}
+
+// default camera is at 0.0, 0.0, 5.0, looking at 0 with up as Y | Pass this as uniform data
+fn raytrace(uv: vec2<f32>) -> RayTraceResult {
+    var fallback_far: f32;
     if settings.level == 1 {
         fallback_far = camera.far * 2.0;
     } else {
         fallback_far = camera.far - 1.0;
     }
 
+    let ray = ray_from_uv(uv);
+    for (var geometry_index: u32 = 0; geometry_index < arrayLength(&geometry); geometry_index++) {
+        if hit_sphere(geometry[geometry_index], ray) {
+            return RayTraceResult(
+                vec4<f32>(
+                    1.0, 0.0, 0.0, 1.0,
+                ),
+                5.5,
+            );
+        }
+    }
+
     return RayTraceResult(
         vec4<f32>(
-            1.0,
-            0.0,
-            0.0,
+            ray_color(ray),
             1.0,
         ),
         fallback_far,
     );
+}
+
+fn ray_color(ray: Ray) -> vec3<f32> {
+    let unit: vec3<f32> = normalize(ray.direction);
+    let a: f32 = 0.5 * (unit.y + 1.0);
+    let color: vec3<f32> = (1.0 - a) * vec3<f32>(1.0, 1.0, 1.0) + a * vec3<f32>(0.0, 0.0, 1.0);
+    return color;
+}
+
+fn hit_sphere(sphere: Sphere, ray: Ray) -> bool {
+    let oc: vec3<f32> = sphere.position - ray.origin;
+    let a = dot(ray.direction, ray.direction);
+    let b = -2.0 * dot(ray.direction, oc);
+    let c = dot(oc, oc) - sphere.radius * sphere.radius;
+    let discriminant = b * b - 4 * a * c;
+    return (discriminant >= 0);
 }
