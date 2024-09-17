@@ -1,4 +1,5 @@
 use bevy::prelude::*;
+use bevy_flycam::{FlyCam, NoCameraPlayerPlugin};
 use bevy_inspector_egui::quick::WorldInspectorPlugin;
 
 use bevy_mod_picking::DefaultPickingPlugins;
@@ -15,6 +16,7 @@ fn main() {
             WorldInspectorPlugin::new(),
             DefaultPickingPlugins,
             TransformGizmoPlugin::default(),
+            NoCameraPlayerPlugin,
         ))
         .add_systems(Startup, setup)
         .add_systems(Last, remove_transform_gizmo_clear)
@@ -41,6 +43,7 @@ fn setup(
         Name::new("Raytraced Camera"),
         RayTracing::FallbackRaytraced,
         bevy_transform_gizmo::GizmoPickSource::default(),
+        FlyCam,
     ));
 
     // cube

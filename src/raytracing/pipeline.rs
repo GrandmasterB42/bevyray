@@ -26,34 +26,44 @@ use super::RayTracing;
 
 // Turning the marker into something the GPU can use
 impl ExtractComponent for RayTracing {
-    type QueryData = (&'static RayTracing, &'static Projection);
+    type QueryData = (
+        &'static RayTracing,
+        &'static GlobalTransform,
+        &'static Projection,
+    );
 
-    type QueryFilter = ();
+    type QueryFilter = With<RayTracing>;
 
     type Out = (RayTraceLevelExtract, CameraExtract);
 
     fn extract_component(item: QueryItem<'_, Self::QueryData>) -> Option<Self::Out> {
-        let camera = match *item.1 {
+        let camera = match *item.2 {
             Projection::Perspective(PerspectiveProjection {
                 fov,
                 aspect_ratio,
                 near,
                 far,
-            }) => CameraExtract {
-                projection: 0,
-                near,
-                far,
-                aspect: aspect_ratio,
-                fov,
-            },
+            }) => {
+                let transform = item.1;
+
+                // Maybe just pass the Matrix at some point
+                let position = transform.translation();
+                let direction = transform.forward().as_vec3();
+                let up = transform.up().as_vec3();
+
+                CameraExtract {
+                    projection: 0,
+                    near,
+                    far,
+                    aspect: aspect_ratio,
+                    fov,
+                    position,
+                    direction,
+                    up,
+                }
+            }
             // Currently unsupported
-            Projection::Orthographic(OrthographicProjection { near, far, .. }) => CameraExtract {
-                projection: 1,
-                near,
-                far,
-                fov: 0.0,
-                aspect: 0.0,
-            },
+            Projection::Orthographic(OrthographicProjection { .. }) => return None,
         };
 
         let level = RayTraceLevelExtract {
@@ -78,6 +88,9 @@ pub struct CameraExtract {
     fov: f32,
     // width / height
     aspect: f32,
+    position: Vec3,
+    direction: Vec3,
+    up: Vec3,
 }
 
 #[derive(Clone, Component, ExtractComponent, ShaderType)]

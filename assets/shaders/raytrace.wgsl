@@ -41,6 +41,9 @@ struct Camera {
     far: f32,
     fov: f32,
     aspect: f32,
+    position: vec3<f32>,
+    direction: vec3<f32>,
+    up: vec3<f32>,
 }
 
 @group(1) @binding(0) var<storage, read_write> geometry: array<Sphere>;
@@ -85,7 +88,6 @@ fn fragment(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
     return raytrace_result.color;
 }
 
-
 struct Ray {
     origin: vec3<f32>,
     direction: vec3<f32>,
@@ -95,17 +97,13 @@ fn ray_from_uv(uv: vec2<f32>) -> Ray {
     let ndc_x = uv.x * 2.0 - 1.0;
     let ndc_y = 1.0 - uv.y * 2.0;
 
-    // up and direction need to be passed in the uniform
-    let camera_direction = vec3<f32>(0.0, 0.0, -1.0);
-    let camera_up = vec3<f32>(0.0, 1.0, 0.0);
-
-    let right = normalize(cross(camera_direction, camera_up));
-    let up = normalize(cross(right, camera_direction));
+    let right = normalize(cross(camera.direction, camera.up));
+    let up = normalize(cross(right, camera.direction));
 
     let scale = tan(camera.fov * 0.5);
-    let ray_direction = normalize(camera_direction + ndc_x * camera.aspect * scale * right + ndc_y * scale * up);
+    let ray_direction = normalize(camera.direction + ndc_x * camera.aspect * scale * right + ndc_y * scale * up);
 
-    return Ray(vec3<f32>(0.0, 0.0, 5.0), ray_direction);
+    return Ray(camera.position, ray_direction);
 }
 
 // default camera is at 0.0, 0.0, 5.0, looking at 0 with up as Y | Pass this as uniform data

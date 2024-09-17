@@ -6,6 +6,7 @@ edition = "2021"
 [dependencies]
 bevy = "0.14"
 bevy-inspector-egui = "0.25"
+bevy_flycam = "0.14"
 bevy_mod_picking = "0.20"
 bevy_transform_gizmo = "0.12"
 
