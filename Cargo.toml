@@ -7,7 +7,10 @@ edition = "2021"
 bevy = "0.14"
 bevy-inspector-egui = "0.25"
 bevy_flycam = "0.14"
-bevy_mod_picking = "0.20"
+bevy_mod_picking = { version = "0.20", default-features = false, features = [
+    "backend_raycast",
+    "selection",
+] }
 bevy_transform_gizmo = "0.12"
 
 [profile.dev]

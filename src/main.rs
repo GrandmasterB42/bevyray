@@ -19,6 +19,7 @@ fn main() {
             NoCameraPlayerPlugin,
         ))
         .add_systems(Startup, setup)
+        .add_systems(Update, sync_picking_radius)
         .add_systems(Last, remove_transform_gizmo_clear)
         .run();
 }
@@ -59,14 +60,18 @@ fn setup(
     ));
 
     // Sphere
-    commands.spawn(RaytracedSphere {
-        position: Vec3 {
-            x: 0.0,
-            y: 0.5,
-            z: 0.0,
+    commands.spawn((
+        RaytracedSphere { radius: 1.1 },
+        Name::from("Raytraced Sphere"),
+        // Components for making it pickable
+        PbrBundle {
+            mesh: meshes.add(Sphere::new(1.0)),
+            transform: Transform::from_xyz(0.0, 0.5, 0.0),
+            ..default()
         },
-        radius: 1.2,
-    });
+        bevy_mod_picking::PickableBundle::default(),
+        bevy_transform_gizmo::GizmoTransformable,
+    ));
 
     // light
     commands.spawn(DirectionalLightBundle {
@@ -93,4 +98,13 @@ fn remove_transform_gizmo_clear(
     };
 
     gizmo_cam.clear_color = ClearColorConfig::None;
+}
+
+// Replace the sphere used for picking to have the same size | This should be a non-issue with meshes as their Globaltransform should be loaded into the shader
+fn sync_picking_radius(
+    mut sync_items: Query<(&RaytracedSphere, &mut Transform), Changed<RaytracedSphere>>,
+) {
+    for (sphere, mut transform) in sync_items.iter_mut() {
+        transform.scale = Vec3::splat(sphere.radius - 0.1);
+    }
 }

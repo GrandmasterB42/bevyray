@@ -93,24 +93,41 @@ pub struct CameraExtract {
     up: Vec3,
 }
 
-#[derive(Clone, Component, ExtractComponent, ShaderType)]
+#[derive(Component, Reflect)]
 pub struct RaytracedSphere {
-    pub position: Vec3,
     pub radius: f32,
+}
+
+#[derive(Clone, Component, ShaderType)]
+pub struct RaytracedSphereExtract {
+    position: Vec3,
+    radius: f32,
+}
+
+impl ExtractComponent for RaytracedSphereExtract {
+    type QueryData = (&'static RaytracedSphere, &'static GlobalTransform);
+
+    type QueryFilter = ();
+
+    type Out = Self;
+
+    fn extract_component(item: QueryItem<'_, Self::QueryData>) -> Option<Self::Out> {
+        Some(RaytracedSphereExtract {
+            position: item.1.translation(),
+            radius: item.0.radius,
+        })
+    }
 }
 
 #[derive(Resource, Default)]
 // This seems dumb
-pub struct GeometryBuffer(std::sync::Mutex<StorageBuffer<Vec<RaytracedSphere>>>);
+pub struct GeometryBuffer(std::sync::Mutex<StorageBuffer<Vec<RaytracedSphereExtract>>>);
 
 pub fn prepare_geometry_buffer(
     geometry: ResMut<GeometryBuffer>,
-    spheres: Query<(&RaytracedSphere,)>,
+    spheres: Query<&RaytracedSphereExtract>,
 ) {
-    let all_spheres = spheres
-        .iter()
-        .map(|(sphere,)| sphere.clone())
-        .collect::<Vec<_>>();
+    let all_spheres = spheres.iter().cloned().collect::<Vec<_>>();
 
     let Ok(mut buffer) = geometry.0.lock() else {
         return;

@@ -12,9 +12,10 @@ use bevy::{
         Render, RenderApp, RenderSet,
     },
 };
+
 use pipeline::{
     prepare_geometry_buffer, CameraExtract, GeometryBuffer, RayTraceLevelExtract, RayTracingNode,
-    RaytracingPipeline,
+    RaytracedSphereExtract, RaytracingPipeline,
 };
 
 mod pipeline;
@@ -37,7 +38,7 @@ impl Plugin for RayTracePlugin {
             // for this plugin to work correctly.
             ExtractComponentPlugin::<RayTracing>::default(),
             // Extracting the Geometry from the main world
-            ExtractComponentPlugin::<RaytracedSphere>::default(),
+            ExtractComponentPlugin::<RaytracedSphereExtract>::default(),
             // The settings will also be the data used in the shader.
             // This plugin will prepare the component for the GPU by creating a uniform buffer
             // and writing the data to that buffer every frame.
@@ -49,6 +50,7 @@ impl Plugin for RayTracePlugin {
         // TODO: Investigate how to make this Msaa compatible
         .insert_resource(Msaa::Off)
         .register_type::<RayTracing>()
+        .register_type::<RaytracedSphere>()
         .add_systems(Update, auto_add_depth_prepass);
 
         // We need to get the render app from the main app
