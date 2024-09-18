@@ -2,7 +2,10 @@ use bevy::prelude::*;
 use bevy_flycam::{FlyCam, NoCameraPlayerPlugin};
 use bevy_inspector_egui::quick::WorldInspectorPlugin;
 
-use bevy_mod_picking::DefaultPickingPlugins;
+use bevy_mod_picking::{
+    backends::raycast::{bevy_mod_raycast::prelude::RaycastVisibility, RaycastBackendSettings},
+    DefaultPickingPlugins,
+};
 use bevy_transform_gizmo::TransformGizmoPlugin;
 use raytracing::{RaytracePlugin, RaytracedSphere, Raytracing};
 
@@ -18,7 +21,7 @@ fn main() {
             TransformGizmoPlugin::default(),
             NoCameraPlayerPlugin,
         ))
-        .add_systems(Startup, setup)
+        .add_systems(Startup, (setup, modify_raycast_backend))
         .add_systems(Update, sync_picking_radius)
         .add_systems(Last, remove_transform_gizmo_clear)
         .run();
@@ -61,13 +64,14 @@ fn setup(
 
     // Sphere
     commands.spawn((
-        RaytracedSphere { radius: 1.1 },
+        RaytracedSphere { radius: 1.5 },
         Name::from("Raytraced Sphere"),
-        // Components for making it pickable
         PbrBundle {
             mesh: meshes.add(Sphere::new(1.0)),
             transform: Transform::from_xyz(0.0, 0.5, 0.0),
             material: materials.add(Color::srgb(0.9, 0.1, 0.1)),
+            // Making the rasterized version invisible
+            visibility: Visibility::Hidden,
             ..default()
         },
         bevy_mod_picking::PickableBundle::default(),
@@ -101,11 +105,16 @@ fn remove_transform_gizmo_clear(
     gizmo_cam.clear_color = ClearColorConfig::None;
 }
 
+// Make raycast picking ignore standart visibility
+fn modify_raycast_backend(mut settings: ResMut<RaycastBackendSettings>) {
+    settings.raycast_visibility = RaycastVisibility::Ignore;
+}
+
 // Replace the sphere used for picking to have the same size | This should be a non-issue with meshes as their Globaltransform should be loaded into the shader
 fn sync_picking_radius(
     mut sync_items: Query<(&RaytracedSphere, &mut Transform), Changed<RaytracedSphere>>,
 ) {
     for (sphere, mut transform) in sync_items.iter_mut() {
-        transform.scale = Vec3::splat(sphere.radius - 0.1);
+        transform.scale = Vec3::splat(sphere.radius);
     }
 }
