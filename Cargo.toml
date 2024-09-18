@@ -5,6 +5,10 @@ edition = "2021"
 
 [dependencies]
 bevy = "0.14"
+log = { version = "*", features = [
+    "max_level_debug",
+    "release_max_level_warn",
+] }
 bevy-inspector-egui = "0.25"
 bevy_flycam = "0.14"
 bevy_mod_picking = { version = "0.20", default-features = false, features = [
@@ -18,3 +22,7 @@ opt-level = 1
 
 [profile.dev.package."*"]
 opt-level = 3
+
+[profile.release]
+codegen-units = 1
+lto = "thin"
