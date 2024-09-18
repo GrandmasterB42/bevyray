@@ -158,13 +158,13 @@ fn background_gradient(ray: Ray) -> vec3<f32> {
 fn hit_sphere(sphere: Sphere, ray: Ray) -> f32 {
     let oc: vec3<f32> = sphere.position - ray.origin;
     let a = dot(ray.direction, ray.direction);
-    let b = -2.0 * dot(ray.direction, oc);
+    let h = dot(ray.direction, oc);
     let c = dot(oc, oc) - sphere.radius * sphere.radius;
-    let discriminant = b * b - 4.0 * a * c;
+    let discriminant = h * h - a * c;
 
     if discriminant < 0.0 {
         return -1.0;
     } else {
-        return ((-b - sqrt(discriminant)) / (2.0 * a));
+        return (h - sqrt(discriminant)) / a;
     }
 }
