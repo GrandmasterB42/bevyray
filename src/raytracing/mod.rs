@@ -7,54 +7,30 @@ use bevy::{
     },
     prelude::*,
     render::{
-        extract_component::{ExtractComponentPlugin, UniformComponentPlugin},
-        render_asset::RenderAssetPlugin,
         render_graph::{RenderGraphApp, RenderLabel, ViewNodeRunner},
-        Render, RenderApp, RenderSet,
+        RenderApp,
     },
 };
 
-use pipeline::{
-    prepare_buffers, CameraExtract, GeometryBuffer, MaterialBuffer, RayTraceLevelExtract,
-    RayTracingNode, RaytraceMaterial, RaytracedSphereExtract, RaytracingPipeline,
-};
-
+mod extract;
 mod pipeline;
 
-pub use pipeline::RaytracedSphere;
+use extract::RaytraceExtractPlugin;
+use pipeline::{RayTracingNode, RaytracingPipeline};
 
 #[derive(Debug, Hash, PartialEq, Eq, Clone, RenderLabel)]
-struct RayTraceLabel;
+pub struct RaytraceLabel;
 
-pub struct RayTracePlugin;
+pub struct RaytracePlugin;
 
-impl Plugin for RayTracePlugin {
+impl Plugin for RaytracePlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins((
-            // The settings will be a component that lives in the main world but will
-            // be extracted to the render world every frame.
-            // This makes it possible to control the effect from the main world.
-            // This plugin will take care of extracting it automatically.
-            // It's important to derive [`ExtractComponent`] on [`PostProcessingSettings`]
-            // for this plugin to work correctly.
-            ExtractComponentPlugin::<RayTracing>::default(),
-            // Extracting the Geometry from the main world
-            ExtractComponentPlugin::<RaytracedSphereExtract>::default(),
-            // The settings will also be the data used in the shader.
-            // This plugin will prepare the component for the GPU by creating a uniform buffer
-            // and writing the data to that buffer every frame.
-            UniformComponentPlugin::<RayTraceLevelExtract>::default(),
-            UniformComponentPlugin::<CameraExtract>::default(),
-            // Transforming Assets
-            RenderAssetPlugin::<RaytraceMaterial>::default(),
-            // Taking the handles along to populate the buffers
-            ExtractComponentPlugin::<Handle<StandardMaterial>>::default(),
-        ))
-        // TODO: Investigate how to make this Msaa compatible
-        .insert_resource(Msaa::Off)
-        .register_type::<RayTracing>()
-        .register_type::<RaytracedSphere>()
-        .add_systems(Update, auto_add_depth_prepass);
+        app.add_plugins(RaytraceExtractPlugin)
+            // TODO: Investigate how to make this Msaa compatible
+            .insert_resource(Msaa::Off)
+            .register_type::<Raytracing>()
+            .register_type::<RaytracedSphere>()
+            .add_systems(Update, auto_add_depth_prepass);
 
         // We need to get the render app from the main app
         let Some(render_app) = app.get_sub_app_mut(RenderApp) else {
@@ -76,13 +52,10 @@ impl Plugin for RayTracePlugin {
             // The [`ViewNodeRunner`] is a special [`Node`] that will automatically run the node for each view
             // matching the [`ViewQuery`]
             // Buffers used to send data to the GPU
-            .init_resource::<GeometryBuffer>()
-            .init_resource::<MaterialBuffer>()
-            .add_systems(Render, prepare_buffers.in_set(RenderSet::PrepareResources))
             .add_render_graph_node::<ViewNodeRunner<RayTracingNode>>(
                 // Specify the label of the graph, in this case we want the graph for 3d
                 Core3d, // It also needs the label of the node
-                RayTraceLabel,
+                RaytraceLabel,
             )
             .add_render_graph_edges(
                 Core3d,
@@ -90,7 +63,7 @@ impl Plugin for RayTracePlugin {
                 // This will automatically create all required node edges to enforce the given ordering.
                 (
                     Node3d::Tonemapping,
-                    RayTraceLabel,
+                    RaytraceLabel,
                     Node3d::EndMainPassPostProcessing,
                 ),
             );
@@ -111,11 +84,16 @@ impl Plugin for RayTracePlugin {
 // This is a marker component that specifies the raytracing level for a camera
 #[repr(u32)]
 #[derive(Component, Reflect, Clone, Copy)]
-pub enum RayTracing {
+pub enum Raytracing {
     Skip,
     FallbackRaster,
     FallbackRaytraced,
     Pure,
+}
+
+#[derive(Component, Reflect)]
+pub struct RaytracedSphere {
+    pub radius: f32,
 }
 
 fn auto_add_depth_prepass(

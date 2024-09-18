@@ -4,7 +4,7 @@ use bevy_inspector_egui::quick::WorldInspectorPlugin;
 
 use bevy_mod_picking::DefaultPickingPlugins;
 use bevy_transform_gizmo::TransformGizmoPlugin;
-use raytracing::{RayTracePlugin, RayTracing, RaytracedSphere};
+use raytracing::{RaytracePlugin, RaytracedSphere, Raytracing};
 
 mod raytracing;
 
@@ -12,7 +12,7 @@ fn main() {
     App::new()
         .add_plugins((
             DefaultPlugins,
-            RayTracePlugin,
+            RaytracePlugin,
             WorldInspectorPlugin::new(),
             DefaultPickingPlugins,
             TransformGizmoPlugin::default(),
@@ -42,7 +42,7 @@ fn setup(
             ..default()
         },
         Name::new("Raytraced Camera"),
-        RayTracing::FallbackRaytraced,
+        Raytracing::FallbackRaytraced,
         bevy_transform_gizmo::GizmoPickSource::default(),
         FlyCam,
     ));

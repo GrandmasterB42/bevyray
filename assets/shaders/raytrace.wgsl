@@ -23,16 +23,10 @@
 @group(0) @binding(1) var texture_sampler: sampler;
 @group(0) @binding(2) var depth_texture: texture_depth_2d;
 @group(0) @binding(3) var depth_sampler: sampler;
-struct RayTraceLevel {
+@group(0) @binding(4) var<uniform> settings: RaytraceLevel;
+struct RaytraceLevel {
     level: u32,
 }
-@group(0) @binding(4) var<uniform> settings: RayTraceLevel;
-
-struct RayTraceResult {
-    color: vec4<f32>,
-    depth: f32,
-}
-
 @group(0) @binding(5) var<uniform> camera: Camera;
 struct Camera {
     // 0 -> perspective; 1 -> orthographic
@@ -99,6 +93,11 @@ struct Ray {
     direction: vec3<f32>,
 }
 
+struct RaytraceResult {
+    color: vec4<f32>,
+    depth: f32,
+}
+
 fn ray_from_uv(uv: vec2<f32>) -> Ray {
     let ndc_x = uv.x * 2.0 - 1.0;
     let ndc_y = 1.0 - uv.y * 2.0;
@@ -113,7 +112,7 @@ fn ray_from_uv(uv: vec2<f32>) -> Ray {
 }
 
 // default camera is at 0.0, 0.0, 5.0, looking at 0 with up as Y | Pass this as uniform data
-fn raytrace(uv: vec2<f32>) -> RayTraceResult {
+fn raytrace(uv: vec2<f32>) -> RaytraceResult {
     var fallback_far: f32;
     if settings.level == 1 {
         fallback_far = camera.far * 2.0;
@@ -126,7 +125,7 @@ fn raytrace(uv: vec2<f32>) -> RayTraceResult {
         let sphere = geometry_buffer[geometry_index];
         if hit_sphere(sphere, ray) {
             let material = material_buffer[sphere.material_id];
-            return RayTraceResult(
+            return RaytraceResult(
                 vec4<f32>(
                     material.base_color, 1.0,
                 ),
@@ -135,7 +134,7 @@ fn raytrace(uv: vec2<f32>) -> RayTraceResult {
         }
     }
 
-    return RayTraceResult(
+    return RaytraceResult(
         vec4<f32>(
             background_gradient(ray),
             1.0,
