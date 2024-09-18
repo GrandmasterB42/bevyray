@@ -8,8 +8,9 @@ use bevy::{
         Render, RenderApp, RenderSet,
     },
 };
+use rand::random;
 
-use super::{RaytracedSphere, Raytracing};
+use super::{RaytracedCamera, RaytracedSphere};
 
 pub struct RaytraceExtractPlugin;
 
@@ -22,7 +23,7 @@ impl Plugin for RaytraceExtractPlugin {
             // This plugin will take care of extracting it automatically.
             // It's important to derive [`ExtractComponent`] on [`PostProcessingSettings`]
             // for this plugin to work correctly.
-            ExtractComponentPlugin::<Raytracing>::default(),
+            ExtractComponentPlugin::<RaytracedCamera>::default(),
             // Extracting the Geometry from the main world
             ExtractComponentPlugin::<RaytracedSphereExtract>::default(),
             // The settings will also be the data used in the shader.
@@ -49,6 +50,8 @@ impl Plugin for RaytraceExtractPlugin {
 
 #[derive(Component, Default, Clone, Copy, ShaderType)]
 pub struct CameraExtract {
+    random_seed: u32,
+    sample_count: u32,
     // 0 -> perspective; rest not supported
     projection: u32,
     near: f32,
@@ -56,6 +59,7 @@ pub struct CameraExtract {
     fov: f32,
     // width / height
     aspect: f32,
+    height: u32,
     position: Vec3,
     direction: Vec3,
     up: Vec3,
@@ -68,19 +72,20 @@ pub struct RayTraceLevelExtract {
 }
 
 // Turning the marker into something the GPU can use
-impl ExtractComponent for Raytracing {
+impl ExtractComponent for RaytracedCamera {
     type QueryData = (
-        &'static Raytracing,
+        &'static RaytracedCamera,
         &'static GlobalTransform,
         &'static Projection,
     );
 
-    type QueryFilter = With<Raytracing>;
+    type QueryFilter = ();
 
     type Out = (RayTraceLevelExtract, CameraExtract);
 
     fn extract_component(item: QueryItem<'_, Self::QueryData>) -> Option<Self::Out> {
-        let camera = match *item.2 {
+        let camera = item.0;
+        let camera_extract = match *item.2 {
             Projection::Perspective(PerspectiveProjection {
                 fov,
                 aspect_ratio,
@@ -94,7 +99,12 @@ impl ExtractComponent for Raytracing {
                 let direction = transform.forward().as_vec3();
                 let up = transform.up().as_vec3();
 
+                // TODO: This is probably a bad idea but other solutions needed mutable acces
+                let random_seed = random();
+
                 CameraExtract {
+                    random_seed,
+                    sample_count: camera.sample_count,
                     projection: 0,
                     near,
                     far,
@@ -103,6 +113,7 @@ impl ExtractComponent for Raytracing {
                     position,
                     direction,
                     up,
+                    height: camera.height,
                 }
             }
             // Currently unsupported
@@ -110,9 +121,10 @@ impl ExtractComponent for Raytracing {
         };
 
         let level = RayTraceLevelExtract {
-            level: *item.0 as u32,
+            level: camera.level as u32,
         };
-        Some((level, camera))
+
+        Some((level, camera_extract))
     }
 }
 

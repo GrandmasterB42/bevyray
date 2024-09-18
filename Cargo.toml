@@ -16,6 +16,7 @@ bevy_mod_picking = { version = "0.20", default-features = false, features = [
     "selection",
 ] }
 bevy_transform_gizmo = "0.12"
+rand = "0.8"
 
 [profile.dev]
 opt-level = 1

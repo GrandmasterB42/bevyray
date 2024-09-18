@@ -28,9 +28,10 @@ impl Plugin for RaytracePlugin {
         app.add_plugins(RaytraceExtractPlugin)
             // TODO: Investigate how to make this Msaa compatible
             .insert_resource(Msaa::Off)
+            .register_type::<RaytracedCamera>()
             .register_type::<Raytracing>()
             .register_type::<RaytracedSphere>()
-            .add_systems(Update, auto_add_depth_prepass);
+            .add_systems(Update, auto_add_camera_components);
 
         // We need to get the render app from the main app
         let Some(render_app) = app.get_sub_app_mut(RenderApp) else {
@@ -81,9 +82,17 @@ impl Plugin for RaytracePlugin {
     }
 }
 
+#[derive(Component, Reflect, Clone, Copy)]
+pub struct RaytracedCamera {
+    pub level: Raytracing,
+    pub sample_count: u32,
+    // TODO: This is temporary and only here because it is easy to implement
+    pub height: u32,
+}
+
 // This is a marker component that specifies the raytracing level for a camera
 #[repr(u32)]
-#[derive(Component, Reflect, Clone, Copy)]
+#[derive(Reflect, Clone, Copy)]
 pub enum Raytracing {
     Skip,
     FallbackRaster,
@@ -96,7 +105,7 @@ pub struct RaytracedSphere {
     pub radius: f32,
 }
 
-fn auto_add_depth_prepass(
+fn auto_add_camera_components(
     added: Query<Entity, (With<Camera>, With<Projection>, Without<DepthPrepass>)>,
     mut cmd: Commands,
 ) {

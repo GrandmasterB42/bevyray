@@ -29,12 +29,15 @@ struct RaytraceLevel {
 }
 @group(0) @binding(5) var<uniform> camera: Camera;
 struct Camera {
+    random_seed: u32,
+    sample_count: u32,
     // 0 -> perspective; 1 -> orthographic
     projection_type: u32,
     near: f32,
     far: f32,
     fov: f32,
     aspect: f32,
+    height: u32,
     position: vec3<f32>,
     direction: vec3<f32>,
     up: vec3<f32>,
@@ -52,14 +55,17 @@ struct Material {
     base_color: vec3<f32>,
 }
 
+var<private> rng_state: u32;
+
 @fragment
 fn fragment(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
+    rng_state = camera.random_seed;
     // Skip Raytracing
     if settings.level == 0 {
         return textureSample(screen_texture, texture_sampler, in.uv);
     }
 
-    let raytrace_result = raytrace(in.uv);
+    let raytrace_result = trace_multisampled(in.uv, &rng_state);
         
     // combine option
     if settings.level == 1 || settings.level == 2 {
@@ -97,20 +103,42 @@ struct RaytraceResult {
     depth: f32,
 }
 
-fn ray_from_uv(uv: vec2<f32>) -> Ray {
-    let ndc_x = uv.x * 2.0 - 1.0;
-    let ndc_y = 1.0 - uv.y * 2.0;
+fn random_ray_from_uv(uv: vec2<f32>, state: ptr<private, u32>) -> Ray {
+    let rand_square = vec2<f32>(rngNextFloat(state) - 0.5, rngNextFloat(state) - 0.5);
+    let height = f32(camera.height);
+    let width = f32(camera.height) * camera.aspect;
+    let delta_u = (1.0 / width) * rand_square.x;
+    let delta_v = (1.0 / height) * rand_square.y;
+
+    let ndc_x = (uv.x * 2.0 - 1.0) + delta_u;
+    let ndc_y = (1.0 - uv.y * 2.0) + delta_v;
 
     let right = cross(camera.direction, camera.up);
 
     let scale = tan(camera.fov * 0.5);
-    let ray_direction = normalize(camera.direction + ndc_x * camera.aspect * scale * right + ndc_y * scale * camera.up);
+
+    let ray_direction = normalize(camera.direction + (ndc_x * camera.aspect * scale * right) + (ndc_y * scale * camera.up));
 
     return Ray(camera.position, ray_direction);
 }
 
 // default camera is at 0.0, 0.0, 5.0, looking at 0 with up as Y | Pass this as uniform data
-fn raytrace(uv: vec2<f32>) -> RaytraceResult {
+fn trace_multisampled(uv: vec2<f32>, state: ptr<private, u32>) -> RaytraceResult {
+    var total_result: RaytraceResult = RaytraceResult(vec4<f32>(0.0, 0.0, 0.0, 0.0), 0.0);
+    for (var sample_index: u32 = 0; sample_index < camera.sample_count; sample_index++) {
+        let ray = random_ray_from_uv(uv, state);
+        let sample_result = raytrace(ray);
+
+        total_result.color += sample_result.color;
+        total_result.depth += sample_result.depth;
+    }
+
+    let averaged_color = total_result.color.rgba / (f32(camera.sample_count));
+    let averaged_depth = total_result.depth / f32(camera.sample_count);
+    return RaytraceResult(averaged_color, averaged_depth);
+}
+
+fn raytrace(ray: Ray) -> RaytraceResult {
     var fallback_far: f32;
     if settings.level == 1 {
         fallback_far = camera.far + 10.0;
@@ -118,16 +146,29 @@ fn raytrace(uv: vec2<f32>) -> RaytraceResult {
         fallback_far = camera.far - 1.0;
     }
 
-    let ray = ray_from_uv(uv);
+    var closest = RaytraceResult(vec4<f32>(0.0, 0.0, 0.0, 0.0), 3.40282e+38);
+
     for (var geometry_index: u32 = 0; geometry_index < arrayLength(&geometry_buffer); geometry_index++) {
         let sphere = geometry_buffer[geometry_index];
+
+        // get the hit position
         let hit_distance = hit_sphere(sphere, ray);
-        if hit_distance != -1.0 {
-            if hit_distance > 0.0 {
-                let hit_position = ray_at(ray, hit_distance);
-                let N = normalize(hit_position - sphere.position);
-                return RaytraceResult(vec4<f32>(0.5 * (vec3<f32>(N.x, N.y, N.z) + vec3<f32>(1.0, 1.0, 1.0)), 1.0), hit_distance);
+        if hit_distance != -1.0 && hit_distance > 0.0 {
+            let hit_position = ray_at(ray, hit_distance);
+            let normal = normalize(hit_position - sphere.position);
+
+            if dot(ray.direction, normal) > 0.0 {
+                // inside the sphere
+            } else {
+                // outside the sphere
             }
+
+            let this_hit = RaytraceResult(vec4<f32>(0.5 * (vec3<f32>(normal.x, normal.y, normal.z) + vec3<f32>(1.0, 1.0, 1.0)), 1.0), hit_distance);
+
+            if this_hit.depth < closest.depth {
+                closest = this_hit;
+            }
+            
 
             //let material = material_buffer[sphere.material_id];
             //return RaytraceResult(
@@ -139,14 +180,18 @@ fn raytrace(uv: vec2<f32>) -> RaytraceResult {
         }
     }
 
-    return RaytraceResult(
-        vec4<f32>(
-            background_gradient(ray),
-            1.0,
-        ),
-        fallback_far,
-    );
+    if closest.depth == 3.40282e+38 {
+        return RaytraceResult(
+            vec4<f32>(
+                background_gradient(ray),
+                1.0,
+            ),
+            fallback_far,
+        );
+    }
+    return closest;
 }
+
 
 fn background_gradient(ray: Ray) -> vec3<f32> {
     let unit: vec3<f32> = normalize(ray.direction);
@@ -167,4 +212,25 @@ fn hit_sphere(sphere: Sphere, ray: Ray) -> f32 {
     } else {
         return (h - sqrt(discriminant)) / a;
     }
+}
+
+
+// https://github.com/gnikoloff/webgpu-raytracer/blob/3bdad829c536b530ba98c396dc11d08002427b41/src/shaders/utils/utils.ts#L10
+
+fn rngNextFloat(state: ptr<private, u32>) -> f32 {
+    rngNextInt(state);
+    return f32(*state) / f32(0xffffffffu);
+}
+
+fn rngNextInt(state: ptr<private, u32>) {
+    // PCG random number generator
+    // Based on https://www.shadertoy.com/view/XlGcRh
+
+    let oldState = *state + 747796405u + 2891336453u;
+    let word = ((oldState >> ((oldState >> 28u) + 4u)) ^ oldState) * 277803737u;
+    *state = (word >> 22u) ^ word;
+}
+
+fn randInRange(min: f32, max: f32, state: ptr<private, u32>) -> f32 {
+    return min + rngNextFloat(state) * (max - min);
 }
