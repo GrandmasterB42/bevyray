@@ -54,7 +54,6 @@ struct Material {
 
 @fragment
 fn fragment(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
-    let depth_sample = textureSample(depth_texture, depth_sampler, in.uv);
     // Skip Raytracing
     if settings.level == 0 {
         return textureSample(screen_texture, texture_sampler, in.uv);
@@ -64,21 +63,17 @@ fn fragment(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
         
     // combine option
     if settings.level == 1 || settings.level == 2 {
-        let depth_sample = 1.0 - textureSample(depth_texture, depth_sampler, in.uv);
+        // 0 is at far plane, 1 at near plane
+        let depth = textureSample(depth_texture, depth_sampler, in.uv);
 
-        var rasterized_depth: f32 = 0.0;
-        if camera.projection_type == 0 {
-            rasterized_depth = (camera.near * camera.far) / (camera.far - depth_sample * (camera.far - camera.near));
+        var raytraced_depth = raytrace_result.depth;
+        if raytraced_depth > camera.far {
+            raytraced_depth = -1.0;
         } else {
-            return vec4<f32>(
-                1.0,
-                0.0,
-                0.0,
-                1.0,
-            );
+            raytraced_depth = camera.near / raytraced_depth;
         }
 
-        if rasterized_depth < raytrace_result.depth {
+        if depth > raytraced_depth {
             return textureSample(screen_texture, texture_sampler, in.uv);
         } else {
             return raytrace_result.color;
@@ -93,6 +88,10 @@ struct Ray {
     direction: vec3<f32>,
 }
 
+fn ray_at(ray: Ray, t: f32) -> vec3<f32> {
+    return ray.origin + t * ray.direction;
+}
+
 struct RaytraceResult {
     color: vec4<f32>,
     depth: f32,
@@ -102,11 +101,10 @@ fn ray_from_uv(uv: vec2<f32>) -> Ray {
     let ndc_x = uv.x * 2.0 - 1.0;
     let ndc_y = 1.0 - uv.y * 2.0;
 
-    let right = normalize(cross(camera.direction, camera.up));
-    let up = normalize(cross(right, camera.direction));
+    let right = cross(camera.direction, camera.up);
 
     let scale = tan(camera.fov * 0.5);
-    let ray_direction = normalize(camera.direction + ndc_x * camera.aspect * scale * right + ndc_y * scale * up);
+    let ray_direction = normalize(camera.direction + ndc_x * camera.aspect * scale * right + ndc_y * scale * camera.up);
 
     return Ray(camera.position, ray_direction);
 }
@@ -115,7 +113,7 @@ fn ray_from_uv(uv: vec2<f32>) -> Ray {
 fn raytrace(uv: vec2<f32>) -> RaytraceResult {
     var fallback_far: f32;
     if settings.level == 1 {
-        fallback_far = camera.far * 2.0;
+        fallback_far = camera.far + 10.0;
     } else {
         fallback_far = camera.far - 1.0;
     }
@@ -123,14 +121,21 @@ fn raytrace(uv: vec2<f32>) -> RaytraceResult {
     let ray = ray_from_uv(uv);
     for (var geometry_index: u32 = 0; geometry_index < arrayLength(&geometry_buffer); geometry_index++) {
         let sphere = geometry_buffer[geometry_index];
-        if hit_sphere(sphere, ray) {
-            let material = material_buffer[sphere.material_id];
-            return RaytraceResult(
-                vec4<f32>(
-                    material.base_color, 1.0,
-                ),
-                0.0,
-            );
+        let hit_distance = hit_sphere(sphere, ray);
+        if hit_distance != -1.0 {
+            if hit_distance > 0.0 {
+                let hit_position = ray_at(ray, hit_distance);
+                let N = normalize(hit_position - sphere.position);
+                return RaytraceResult(vec4<f32>(0.5 * (vec3<f32>(N.x, N.y, N.z) + vec3<f32>(1.0, 1.0, 1.0)), 1.0), hit_distance);
+            }
+
+            //let material = material_buffer[sphere.material_id];
+            //return RaytraceResult(
+            //    vec4<f32>(
+            //        material.base_color, 1.0,
+            //    ),
+            //    0.0,
+            //);
         }
     }
 
@@ -150,11 +155,16 @@ fn background_gradient(ray: Ray) -> vec3<f32> {
     return color;
 }
 
-fn hit_sphere(sphere: Sphere, ray: Ray) -> bool {
+fn hit_sphere(sphere: Sphere, ray: Ray) -> f32 {
     let oc: vec3<f32> = sphere.position - ray.origin;
     let a = dot(ray.direction, ray.direction);
     let b = -2.0 * dot(ray.direction, oc);
     let c = dot(oc, oc) - sphere.radius * sphere.radius;
-    let discriminant = b * b - 4 * a * c;
-    return (discriminant >= 0);
+    let discriminant = b * b - 4.0 * a * c;
+
+    if discriminant < 0.0 {
+        return -1.0;
+    } else {
+        return ((-b - sqrt(discriminant)) / (2.0 * a));
+    }
 }
