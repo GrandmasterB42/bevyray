@@ -46,10 +46,16 @@ struct Camera {
     up: vec3<f32>,
 }
 
-@group(1) @binding(0) var<storage, read_write> geometry: array<Sphere>;
+@group(1) @binding(0) var<storage, read_write> geometry_buffer: array<Sphere>;
 struct Sphere {
     position: vec3<f32>,
     radius: f32,
+    material_id: u32,
+}
+
+@group(1) @binding(1) var<storage, read_write> material_buffer: array<Material>;
+struct Material {
+    base_color: vec3<f32>,
 }
 
 @fragment
@@ -116,27 +122,29 @@ fn raytrace(uv: vec2<f32>) -> RayTraceResult {
     }
 
     let ray = ray_from_uv(uv);
-    for (var geometry_index: u32 = 0; geometry_index < arrayLength(&geometry); geometry_index++) {
-        if hit_sphere(geometry[geometry_index], ray) {
+    for (var geometry_index: u32 = 0; geometry_index < arrayLength(&geometry_buffer); geometry_index++) {
+        let sphere = geometry_buffer[geometry_index];
+        if hit_sphere(sphere, ray) {
+            let material = material_buffer[sphere.material_id];
             return RayTraceResult(
                 vec4<f32>(
-                    1.0, 0.0, 0.0, 1.0,
+                    material.base_color, 1.0,
                 ),
-                5.5,
+                0.0,
             );
         }
     }
 
     return RayTraceResult(
         vec4<f32>(
-            ray_color(ray),
+            background_gradient(ray),
             1.0,
         ),
         fallback_far,
     );
 }
 
-fn ray_color(ray: Ray) -> vec3<f32> {
+fn background_gradient(ray: Ray) -> vec3<f32> {
     let unit: vec3<f32> = normalize(ray.direction);
     let a: f32 = 0.5 * (unit.y + 1.0);
     let color: vec3<f32> = (1.0 - a) * vec3<f32>(1.0, 1.0, 1.0) + a * vec3<f32>(0.0, 0.0, 1.0);

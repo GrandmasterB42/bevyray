@@ -67,6 +67,7 @@ fn setup(
         PbrBundle {
             mesh: meshes.add(Sphere::new(1.0)),
             transform: Transform::from_xyz(0.0, 0.5, 0.0),
+            material: materials.add(Color::srgb(0.9, 0.1, 0.1)),
             ..default()
         },
         bevy_mod_picking::PickableBundle::default(),

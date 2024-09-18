@@ -6,6 +6,7 @@ use bevy::{
     prelude::*,
     render::{
         extract_component::{ComponentUniforms, DynamicUniformIndex, ExtractComponent},
+        render_asset::{RenderAsset, RenderAssets},
         render_graph::{NodeRunError, RenderGraphContext, ViewNode},
         render_resource::{
             binding_types::{sampler, texture_2d, uniform_buffer},
@@ -98,7 +99,7 @@ pub struct RaytracedSphere {
     pub radius: f32,
 }
 
-#[derive(Clone, Component, ShaderType)]
+#[derive(Clone, Component)]
 pub struct RaytracedSphereExtract {
     position: Vec3,
     radius: f32,
@@ -119,21 +120,69 @@ impl ExtractComponent for RaytracedSphereExtract {
     }
 }
 
-#[derive(Resource, Default)]
-// This seems dumb
-pub struct GeometryBuffer(std::sync::Mutex<StorageBuffer<Vec<RaytracedSphereExtract>>>);
+#[derive(Clone, Component, ShaderType)]
+pub struct RaytraceMaterial {
+    base_color: Vec3,
+}
 
-pub fn prepare_geometry_buffer(
-    geometry: ResMut<GeometryBuffer>,
-    spheres: Query<&RaytracedSphereExtract>,
+impl RenderAsset for RaytraceMaterial {
+    type SourceAsset = StandardMaterial;
+
+    type Param = ();
+
+    fn prepare_asset(
+        source_asset: Self::SourceAsset,
+        _param: &mut bevy::ecs::system::SystemParamItem<Self::Param>,
+    ) -> Result<Self, bevy::render::render_asset::PrepareAssetError<Self::SourceAsset>> {
+        let base_color = source_asset.base_color.to_linear().to_vec3();
+        Ok(RaytraceMaterial { base_color })
+    }
+}
+
+#[derive(ShaderType)]
+pub struct RayTraceSphere {
+    position: Vec3,
+    radius: f32,
+    material_id: u32,
+}
+
+// This seems dumb | There is probably a better way to send data to the gpu (maybe also only the stuff that changed)
+#[derive(Resource, Default, Deref)]
+pub struct GeometryBuffer(std::sync::Mutex<StorageBuffer<Vec<RayTraceSphere>>>);
+
+#[derive(Resource, Default, Deref)]
+pub struct MaterialBuffer(std::sync::Mutex<StorageBuffer<Vec<RaytraceMaterial>>>);
+
+pub fn prepare_buffers(
+    geometry_buffer: ResMut<GeometryBuffer>,
+    material_buffer: ResMut<MaterialBuffer>,
+    data: Query<(&RaytracedSphereExtract, &Handle<StandardMaterial>)>,
+    materials: Res<RenderAssets<RaytraceMaterial>>,
 ) {
-    let all_spheres = spheres.iter().cloned().collect::<Vec<_>>();
-
-    let Ok(mut buffer) = geometry.0.lock() else {
+    let Ok(mut geometry_buffer) = geometry_buffer.lock() else {
         return;
     };
 
-    buffer.set(all_spheres);
+    let Ok(mut material_buffer) = material_buffer.lock() else {
+        return;
+    };
+
+    let mut all_spheres = Vec::new();
+    let mut all_materials = Vec::new();
+    for (index, (sphere, material_handle)) in data.iter().enumerate() {
+        let material = materials.get(material_handle).expect("This should exist");
+        // TODO: Intergrate this with change detection so these buffers don't get replaced every frame
+        all_materials.push(material.clone());
+
+        all_spheres.push(RayTraceSphere {
+            position: sphere.position,
+            radius: sphere.radius,
+            material_id: index as u32,
+        });
+    }
+
+    geometry_buffer.set(all_spheres);
+    material_buffer.set(all_materials);
 }
 
 // The post process node used for the render graph
@@ -218,18 +267,27 @@ impl ViewNode for RayTracingNode {
 
         let geometry = world.resource::<GeometryBuffer>();
         let mut geometry_buffer = geometry
-            .0
             .lock()
-            .expect("Could not get buffer out of mutex");
+            .expect("Could not get geometry buffer out of mutex");
+
+        let material = world.resource::<MaterialBuffer>();
+        let mut material_buffer = material
+            .lock()
+            .expect("Could not get material buffer out of mutex");
 
         let render_device = render_context.render_device();
         {
             let render_queue = world.resource::<RenderQueue>();
 
             geometry_buffer.write_buffer(render_device, render_queue);
+            material_buffer.write_buffer(render_device, render_queue);
         }
 
         let Some(geometry_buffer_binding) = geometry_buffer.binding() else {
+            return Ok(());
+        };
+
+        let Some(material_buffer_binding) = material_buffer.binding() else {
             return Ok(());
         };
 
@@ -258,10 +316,10 @@ impl ViewNode for RayTracingNode {
             )),
         );
 
-        let geometry_bind_group = render_device.create_bind_group(
+        let buffer_bind_group = render_device.create_bind_group(
             "raytrace_geometry_bind_group",
-            &raytrace_pipeline.geometry_layout,
-            &BindGroupEntries::sequential((geometry_buffer_binding,)),
+            &raytrace_pipeline.buffer_layout,
+            &BindGroupEntries::sequential((geometry_buffer_binding, material_buffer_binding)),
         );
 
         // Begin the render pass
@@ -290,7 +348,7 @@ impl ViewNode for RayTracingNode {
             &bind_group,
             &[settings_index.index(), camera_index.index()],
         );
-        render_pass.set_bind_group(1, &geometry_bind_group, &[]);
+        render_pass.set_bind_group(1, &buffer_bind_group, &[]);
         render_pass.draw(0..3, 0..1);
 
         Ok(())
@@ -301,7 +359,7 @@ impl ViewNode for RayTracingNode {
 #[derive(Resource)]
 pub struct RaytracingPipeline {
     layout: BindGroupLayout,
-    geometry_layout: BindGroupLayout,
+    buffer_layout: BindGroupLayout,
     sampler: Sampler,
     depth_sampler: Sampler,
     pipeline_id: CachedRenderPipelineId,
@@ -334,13 +392,19 @@ impl FromWorld for RaytracingPipeline {
             ),
         );
 
-        let geometry_layout = render_device.create_bind_group_layout(
+        let buffer_layout = render_device.create_bind_group_layout(
             "raytrace_geometry_bind_group_layout",
             &BindGroupLayoutEntries::sequential(
                 // The layout entries will only be visible in the fragment stage
                 ShaderStages::FRAGMENT,
                 (
                     // the geometry buffer
+                    BindingType::Buffer {
+                        ty: BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    // The material buffer
                     BindingType::Buffer {
                         ty: BufferBindingType::Storage { read_only: false },
                         has_dynamic_offset: false,
@@ -362,7 +426,7 @@ impl FromWorld for RaytracingPipeline {
             // This will add the pipeline to the cache and queue it's creation
             .queue_render_pipeline(RenderPipelineDescriptor {
                 label: Some("raytrace_pipeline".into()),
-                layout: vec![layout.clone(), geometry_layout.clone()],
+                layout: vec![layout.clone(), buffer_layout.clone()],
                 // This will setup a fullscreen triangle for the vertex state
                 vertex: fullscreen_shader_vertex_state(),
                 fragment: Some(FragmentState {
@@ -385,7 +449,7 @@ impl FromWorld for RaytracingPipeline {
 
         Self {
             layout,
-            geometry_layout,
+            buffer_layout,
             sampler,
             depth_sampler,
             pipeline_id,
