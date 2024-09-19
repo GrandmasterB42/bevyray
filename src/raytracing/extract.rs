@@ -156,6 +156,10 @@ impl ExtractComponent for RaytracedSphereExtract {
 pub struct RaytraceMaterial {
     base_color: Vec3,
     metallic: f32,
+    roughness: f32,
+    reflectance: f32,
+    ior: f32,
+    specular_transmission: f32,
 }
 
 impl RenderAsset for RaytraceMaterial {
@@ -167,11 +171,13 @@ impl RenderAsset for RaytraceMaterial {
         source_asset: Self::SourceAsset,
         _param: &mut bevy::ecs::system::SystemParamItem<Self::Param>,
     ) -> Result<Self, bevy::render::render_asset::PrepareAssetError<Self::SourceAsset>> {
-        let base_color = source_asset.base_color.to_linear().to_vec3();
-        let metallic = source_asset.metallic;
         Ok(RaytraceMaterial {
-            base_color,
-            metallic,
+            base_color: source_asset.base_color.to_linear().to_vec3(),
+            metallic: source_asset.metallic,
+            roughness: source_asset.perceptual_roughness,
+            reflectance: source_asset.reflectance,
+            ior: source_asset.ior,
+            specular_transmission: source_asset.specular_transmission,
         })
     }
 }

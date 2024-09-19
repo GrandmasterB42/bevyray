@@ -50,8 +50,8 @@ fn setup(
         Name::new("Raytraced Camera"),
         RaytracedCamera {
             level: Raytracing::FallbackRaytraced,
-            sample_count: 1,
-            bounces: 1,
+            sample_count: 16,
+            bounces: 8,
             // TODO: This is temporary and only here because it is easy to implement
             height: 0,
         },
@@ -121,7 +121,33 @@ fn setup(
             transform: Transform::from_xyz(-1.0, 0.0, 1.0),
             material: materials.add(StandardMaterial {
                 base_color: Color::srgb(0.8, 0.8, 0.8),
-                metallic: 1.0,
+                metallic: 0.0,
+                perceptual_roughness: 0.0,
+                specular_transmission: 1.0,
+                ior: 1.5,
+                ..default()
+            }),
+            // Making the rasterized version invisible
+            visibility: Visibility::Hidden,
+            ..default()
+        },
+        bevy_mod_picking::PickableBundle::default(),
+        bevy_transform_gizmo::GizmoTransformable,
+    ));
+
+    commands.spawn((
+        RaytracedSphere { radius: 0.4 },
+        Name::from("Raytraced Sphere"),
+        PbrBundle {
+            // This mesh is only for picking
+            mesh: meshes.add(Sphere::new(1.0)),
+            transform: Transform::from_xyz(-1.0, 0.0, 1.0),
+            material: materials.add(StandardMaterial {
+                base_color: Color::srgb(0.8, 0.8, 0.8),
+                metallic: 0.0,
+                perceptual_roughness: 0.0,
+                specular_transmission: 1.0,
+                ior: 1.0 / 1.5,
                 ..default()
             }),
             // Making the rasterized version invisible
@@ -142,6 +168,7 @@ fn setup(
             material: materials.add(StandardMaterial {
                 base_color: Color::srgb(0.8, 0.6, 0.2),
                 metallic: 1.0,
+                perceptual_roughness: 1.0,
                 ..default()
             }),
             // Making the rasterized version invisible

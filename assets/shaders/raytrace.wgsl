@@ -53,8 +53,18 @@ struct Sphere {
 
 @group(1) @binding(1) var<storage, read_write> material_buffer: array<Material>;
 struct Material {
+    // Doubles as diffuse albedo for non-metallic, specular for metallic and a mix for everything in between
     base_color: vec3<f32>,
+    // 0.0 for dielectric materials, 1.0 for metallic
     metallic: f32,
+    // 0.0 -> very glossy
+    roughness: f32, // "Fuzzy Reflection"
+    // Specular intensity for non-metals
+    reflectance: f32, // unused for now
+    // Index of refraction
+    ior: f32,
+    // transmission through a material via refraction
+    specular_transmission: f32
 }
 
 const PI: f32 = 3.141592653589793;
@@ -161,26 +171,36 @@ fn raytrace(base_ray: Ray, state: ptr<private, u32>) -> RaytraceResult {
     for (; bounce_count <= camera.bounce_count; bounce_count++) {
         let hit = raycast(ray);
 
+        // Setting the depth for depth buffer comparison, this might have to be a early return at some point
         if bounce_count == 0 {
             first_depth = hit.distance;
         }
 
+        // The background
         if hit.distance == INF {
             lightSourceColor = background_gradient(ray);
             break;
         }
 
         let material = material_buffer[hit.object];
-        let attenuation = scatter(material, &ray, hit, state);
+
+        var attenuation: vec3<f32>;
+        let absorbed = scatter(material, &ray, &attenuation, hit, state);
+
+        // rays getting absorbed
+        if absorbed {
+            break;
+        }
+
         ray_color *= attenuation;
     }
 
-    // A extra bounce could be added -> the break wasn't hit
+    // A extra bounce could be added -> the background break wasn't hit
     if bounce_count == camera.bounce_count + 1 {
         ray_color = vec3<f32>(0.0, 0.0, 0.0);
     }
 
-    if bounce_count == 0 {
+    if first_depth == INF {
         first_depth = fallback_far;
     }
 
@@ -191,22 +211,72 @@ fn linear_to_gamma_Vec3(in: vec3<f32>) -> vec3<f32> {
     return vec3<f32>(sqrt(in.x), sqrt(in.y), sqrt(in.z));
 }
 
-fn scatter(material: Material, scattered: ptr<function, Ray>, hit: HitInfo, state: ptr<private, u32>) -> vec3<f32> {
+// returns wether the ray was absorbed
+fn scatter(material: Material, scattered: ptr<function, Ray>, attenuation: ptr<function, vec3<f32>>, hit: HitInfo, state: ptr<private, u32>) -> bool {
     if rngNextFloat(state) < material.metallic {
         // metallic interaction
-        let reflected = reflect((*scattered).direction, hit.normal);
+        
+        // reflection and roughness 
+        let reflected = normalize(reflect((*scattered).direction, hit.normal)) + (material.roughness * randomUnitVec3(state));
+
+        // setting return values
         *scattered = Ray(hit.position, reflected);
-        return material.base_color;
+        *attenuation = material.base_color;
+
+        // Discord below surface
+        return dot((*scattered).direction, hit.normal) < 0;
     } else {
         // non-metallic interaction
-        var scatter_direction = hit.normal + randomUnitVec3(state);
 
-        if vec3_near_zero(scatter_direction) {
-            scatter_direction = hit.normal;
+        if rngNextFloat(state) < material.specular_transmission {
+            // Specular transmission
+
+            var ri: f32;
+            if hit.front_face {
+                // inside
+                ri = 1.0 / material.ior;
+            } else {
+                // outside
+                ri = material.ior;
+            }
+
+            let unit_direction = normalize((*scattered).direction);
+
+            let cos_theta = min(dot(-unit_direction, hit.normal), 1.0);
+            let sin_theta = sqrt(1.0 - cos_theta * cos_theta);
+
+            let cannot_refract = ri * sin_theta > 1.0;
+            var direction: vec3<f32>;
+
+            if cannot_refract || reflectance(cos_theta, ri) > rngNextFloat(state) {
+                direction = reflect(unit_direction, hit.normal);
+            } else {
+                direction = refract(unit_direction, hit.normal, ri);
+            }
+
+            // setting return values
+            *scattered = Ray(hit.position, direction);
+            *attenuation = vec3<f32>(1.0, 1.0, 1.0);
+
+            // A refrected ray always continues on
+            return false;
+        } else {
+            // normal diffuse
+
+            // diffuse and roughness
+            var scatter_direction = hit.normal + randomUnitVec3(state) + (material.roughness * randomUnitVec3(state));
+
+            if vec3_near_zero(scatter_direction) {
+                scatter_direction = hit.normal;
+            }
+
+            // setting return values
+            *scattered = Ray(hit.position, scatter_direction);
+            *attenuation = material.base_color;
+
+            // Discard below surface
+            return dot((*scattered).direction, hit.normal) < 0;
         }
-
-        *scattered = Ray(hit.position, scatter_direction);
-        return material.base_color;
     }
 }
 
@@ -215,10 +285,11 @@ struct HitInfo {
     position: vec3<f32>,
     normal: vec3<f32>,
     object: u32,
+    front_face: bool,
 }
 
 fn raycast(ray: Ray) -> HitInfo {
-    var closest = HitInfo(INF, vec3<f32>(0.0, 0.0, 0.0), vec3<f32>(0.0, 0.0, 0.0), 0);
+    var closest = HitInfo(INF, vec3<f32>(0.0, 0.0, 0.0), vec3<f32>(0.0, 0.0, 0.0), 0, true);
     for (var geometry_index: u32 = 0; geometry_index < arrayLength(&geometry_buffer); geometry_index++) {
         let sphere = geometry_buffer[geometry_index];
 
@@ -227,7 +298,8 @@ fn raycast(ray: Ray) -> HitInfo {
             if hit_distance < closest.distance {
                 let hit_position = ray_at(ray, hit_distance);
                 let normal = normalize(hit_position - sphere.position);
-                closest = HitInfo(hit_distance, hit_position, normal, geometry_index);
+
+                closest = HitInfo(hit_distance, hit_position, normal, geometry_index, dot(ray.direction, normal) < 0.0);
             }
         }
     }
@@ -251,13 +323,27 @@ fn hit_sphere(sphere: Sphere, ray: Ray) -> f32 {
 
     if discriminant < 0.0 {
         return -1.0;
-    } else {
-        return (h - sqrt(discriminant)) / a;
     }
+
+    return (h - sqrt(discriminant)) / a;
 }
 
 fn reflect(vector: vec3<f32>, normal: vec3<f32>) -> vec3<f32> {
     return vector - 2 * dot(vector, normal) * normal;
+}
+
+fn refract(vector: vec3<f32>, normal: vec3<f32>, etai_over_etat: f32) -> vec3<f32> {
+    let cos_theta = min(dot(-vector, normal), 1.0);
+    let r_out_perp = etai_over_etat * (vector + cos_theta * normal);
+    let r_out_parallel = -sqrt(abs(1.0 - dot(r_out_perp, r_out_perp))) * normal;
+    return r_out_perp + r_out_parallel;
+}
+
+fn reflectance(cosine: f32, refraction_index: f32) -> f32 {
+    // Use Schlick's approximation for reflectance.
+    var r0 = (1.0 - refraction_index) / (1.0 + refraction_index);
+    r0 = r0 * r0;
+    return r0 + (1.0 - r0) * pow((1.0 - cosine), 5.0);
 }
 
 fn vec3_near_zero(vector: vec3<f32>) -> bool {
