@@ -86,6 +86,7 @@ impl Plugin for RaytracePlugin {
 pub struct RaytracedCamera {
     pub level: Raytracing,
     pub sample_count: u32,
+    pub bounces: u32,
     // TODO: This is temporary and only here because it is easy to implement
     pub height: u32,
 }

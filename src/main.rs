@@ -51,6 +51,7 @@ fn setup(
         RaytracedCamera {
             level: Raytracing::FallbackRaytraced,
             sample_count: 1,
+            bounces: 1,
             // TODO: This is temporary and only here because it is easy to implement
             height: 0,
         },
@@ -88,12 +89,11 @@ fn setup(
 
     // "World" Sphere
     commands.spawn((
-        // real earth radius had too much imprecision
-        RaytracedSphere { radius: 63780.0 },
+        RaytracedSphere { radius: 500.0 },
         Name::from("Raytraced Sphere"),
         PbrBundle {
             mesh: meshes.add(Sphere::new(1.0)),
-            transform: Transform::from_xyz(0.0, -63780.5, 0.0),
+            transform: Transform::from_xyz(0.0, -500.5, 0.0),
             material: materials.add(Color::srgb(0.1, 0.9, 0.1)),
             // Making the rasterized version invisible
             visibility: Visibility::Hidden,

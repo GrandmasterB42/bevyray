@@ -8,7 +8,7 @@ use bevy::{
         Render, RenderApp, RenderSet,
     },
 };
-use rand::random;
+use rand::{thread_rng, Rng};
 
 use super::{RaytracedCamera, RaytracedSphere};
 
@@ -50,8 +50,9 @@ impl Plugin for RaytraceExtractPlugin {
 
 #[derive(Component, Default, Clone, Copy, ShaderType)]
 pub struct CameraExtract {
-    random_seed: u32,
+    random_seed: f32,
     sample_count: u32,
+    bounce_count: u32,
     // 0 -> perspective; rest not supported
     projection: u32,
     near: f32,
@@ -100,11 +101,13 @@ impl ExtractComponent for RaytracedCamera {
                 let up = transform.up().as_vec3();
 
                 // TODO: This is probably a bad idea but other solutions needed mutable acces
-                let random_seed = random();
+                let mut rng = thread_rng();
+                let random_seed: f32 = rng.gen_range(0.0..1.0);
 
                 CameraExtract {
                     random_seed,
                     sample_count: camera.sample_count,
+                    bounce_count: camera.bounces,
                     projection: 0,
                     near,
                     far,

@@ -29,8 +29,9 @@ struct RaytraceLevel {
 }
 @group(0) @binding(5) var<uniform> camera: Camera;
 struct Camera {
-    random_seed: u32,
+    random_seed: f32,
     sample_count: u32,
+    bounce_count: u32,
     // 0 -> perspective; 1 -> orthographic
     projection_type: u32,
     near: f32,
@@ -55,11 +56,14 @@ struct Material {
     base_color: vec3<f32>,
 }
 
+const PI: f32 = 3.141592653589793;
+const INF: f32 = 3.40282e+38;
+
 var<private> rng_state: u32;
 
 @fragment
 fn fragment(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
-    rng_state = camera.random_seed;
+    rng_state = u32((camera.random_seed * 10000.0) * (in.uv.x * 402.0) * (in.uv.y * 31.5)) ;
     // Skip Raytracing
     if settings.level == 0 {
         return textureSample(screen_texture, texture_sampler, in.uv);
@@ -82,11 +86,11 @@ fn fragment(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
         if depth > raytraced_depth {
             return textureSample(screen_texture, texture_sampler, in.uv);
         } else {
-            return raytrace_result.color;
+            return vec4<f32>(raytrace_result.color, 1.0);
         }
     }
 
-    return raytrace_result.color;
+    return vec4<f32>(raytrace_result.color, 1.0);
 }
 
 struct Ray {
@@ -99,7 +103,7 @@ fn ray_at(ray: Ray, t: f32) -> vec3<f32> {
 }
 
 struct RaytraceResult {
-    color: vec4<f32>,
+    color: vec3<f32>,
     depth: f32,
 }
 
@@ -124,21 +128,23 @@ fn random_ray_from_uv(uv: vec2<f32>, state: ptr<private, u32>) -> Ray {
 
 // default camera is at 0.0, 0.0, 5.0, looking at 0 with up as Y | Pass this as uniform data
 fn trace_multisampled(uv: vec2<f32>, state: ptr<private, u32>) -> RaytraceResult {
-    var total_result: RaytraceResult = RaytraceResult(vec4<f32>(0.0, 0.0, 0.0, 0.0), 0.0);
+    var total_result: RaytraceResult = RaytraceResult(vec3<f32>(0.0, 0.0, 0.0), 0.0);
     for (var sample_index: u32 = 0; sample_index < camera.sample_count; sample_index++) {
         let ray = random_ray_from_uv(uv, state);
-        let sample_result = raytrace(ray);
+        let sample_result = raytrace(ray, state);
 
         total_result.color += sample_result.color;
         total_result.depth += sample_result.depth;
     }
 
-    let averaged_color = total_result.color.rgba / (f32(camera.sample_count));
+    let averaged_color = total_result.color.rgb / (f32(camera.sample_count));
     let averaged_depth = total_result.depth / f32(camera.sample_count);
     return RaytraceResult(averaged_color, averaged_depth);
 }
 
-fn raytrace(ray: Ray) -> RaytraceResult {
+fn raytrace(base_ray: Ray, state: ptr<private, u32>) -> RaytraceResult {
+    var ray = base_ray;
+
     var fallback_far: f32;
     if settings.level == 1 {
         fallback_far = camera.far + 10.0;
@@ -146,57 +152,76 @@ fn raytrace(ray: Ray) -> RaytraceResult {
         fallback_far = camera.far - 1.0;
     }
 
-    var closest = RaytraceResult(vec4<f32>(0.0, 0.0, 0.0, 0.0), 3.40282e+38);
+    var first_depth: f32 = INF;
+    var ray_color: vec3<f32> = vec3<f32>(1.0, 1.0, 1.0); // Start with full white intensity
+    var attenuation: f32 = 0.5; // Initial attenuation factor for each bounce
 
+    var bounce_count: u32 = 0;
+    for (; bounce_count <= camera.bounce_count; bounce_count++) {
+        let hit = raycast(ray);
+
+        if bounce_count == 0 {
+            first_depth = hit.distance;
+        }
+
+        if hit.distance == INF {
+            ray_color *= attenuation * background_gradient(ray);
+            break;
+        }
+
+        ray_color *= attenuation;
+
+        ray.origin = hit.position;
+        ray.direction = hit.normal + randomUnitVec3(state);
+
+        attenuation *= 0.5;
+    }
+
+    // A extra bounce could be added -> the break wasn't hit
+    if bounce_count == camera.bounce_count + 1 {
+        ray_color = vec3<f32>(0.0, 0.0, 0.0);
+    }
+
+    if first_depth == INF {
+        return RaytraceResult(background_gradient(ray), fallback_far);
+    }
+    return RaytraceResult(linear_to_gamma_Vec3(ray_color), first_depth);
+}
+
+fn linear_to_gamma_Vec3(in: vec3<f32>) -> vec3<f32> {
+    return vec3<f32>(sqrt(in.x), sqrt(in.y), sqrt(in.z));
+}
+
+
+struct HitInfo {
+    distance: f32,
+    position: vec3<f32>,
+    normal: vec3<f32>,
+    object: u32,
+}
+
+fn raycast(ray: Ray) -> HitInfo {
+    var closest = HitInfo(INF, vec3<f32>(0.0, 0.0, 0.0), vec3<f32>(0.0, 0.0, 0.0), 0);
     for (var geometry_index: u32 = 0; geometry_index < arrayLength(&geometry_buffer); geometry_index++) {
         let sphere = geometry_buffer[geometry_index];
 
-        // get the hit position
         let hit_distance = hit_sphere(sphere, ray);
-        if hit_distance != -1.0 && hit_distance > 0.0 {
-            let hit_position = ray_at(ray, hit_distance);
-            let normal = normalize(hit_position - sphere.position);
-
-            if dot(ray.direction, normal) > 0.0 {
-                // inside the sphere
-            } else {
-                // outside the sphere
+        if hit_distance != -1.0 && hit_distance > 0.001 {
+            if hit_distance < closest.distance {
+                let hit_position = ray_at(ray, hit_distance);
+                let normal = normalize(hit_position - sphere.position);
+                closest = HitInfo(hit_distance, hit_position, normal, geometry_index);
             }
-
-            let this_hit = RaytraceResult(vec4<f32>(0.5 * (vec3<f32>(normal.x, normal.y, normal.z) + vec3<f32>(1.0, 1.0, 1.0)), 1.0), hit_distance);
-
-            if this_hit.depth < closest.depth {
-                closest = this_hit;
-            }
-            
-
-            //let material = material_buffer[sphere.material_id];
-            //return RaytraceResult(
-            //    vec4<f32>(
-            //        material.base_color, 1.0,
-            //    ),
-            //    0.0,
-            //);
         }
     }
 
-    if closest.depth == 3.40282e+38 {
-        return RaytraceResult(
-            vec4<f32>(
-                background_gradient(ray),
-                1.0,
-            ),
-            fallback_far,
-        );
-    }
     return closest;
 }
-
 
 fn background_gradient(ray: Ray) -> vec3<f32> {
     let unit: vec3<f32> = normalize(ray.direction);
     let a: f32 = 0.5 * (unit.y + 1.0);
-    let color: vec3<f32> = (1.0 - a) * vec3<f32>(1.0, 1.0, 1.0) + a * vec3<f32>(0.0, 0.0, 1.0);
+    let color: vec3<f32> = (1.0 - a) * vec3<f32>(1.0, 1.0, 1.0) + a * vec3<f32>(0.5, 0.7, 1.0);
     return color;
 }
 
@@ -231,6 +256,22 @@ fn rngNextInt(state: ptr<private, u32>) {
     *state = (word >> 22u) ^ word;
 }
 
-fn randInRange(min: f32, max: f32, state: ptr<private, u32>) -> f32 {
-    return min + rngNextFloat(state) * (max - min);
+fn randomVec3InUnitSphere(state: ptr<private, u32>) -> vec3<f32> {
+    var p: vec3<f32>;
+    loop {
+        p = 2.0 * vec3<f32>(rngNextFloat(state), rngNextFloat(state), rngNextFloat(state)) - vec3<f32>(1.0);
+        if dot(p, p) <= 1.0 {
+            break;
+        }
+    }
+    return p;
+}
+
+fn randomUnitVec3(rngState: ptr<private, u32>) -> vec3<f32> {
+    return (randomVec3InUnitSphere(rngState));
+}
+
+fn randomUnitVec3OnHemisphere(normal: vec3<f32>, rngState: ptr<private, u32>) -> vec3<f32> {
+    let onUnitSphere = randomUnitVec3(rngState);
+    return select(-onUnitSphere, onUnitSphere, dot(onUnitSphere, normal) > 0.0);
 }
