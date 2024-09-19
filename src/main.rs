@@ -71,14 +71,19 @@ fn setup(
         bevy_transform_gizmo::GizmoTransformable,
     ));
 
-    // Sphere
+    // Spheres
     commands.spawn((
-        RaytracedSphere { radius: 1.5 },
+        RaytracedSphere { radius: 100.0 },
         Name::from("Raytraced Sphere"),
         PbrBundle {
+            // This mesh is only for picking
             mesh: meshes.add(Sphere::new(1.0)),
-            transform: Transform::from_xyz(0.0, 0.5, 0.0),
-            material: materials.add(Color::srgb(0.9, 0.1, 0.1)),
+            transform: Transform::from_xyz(0.0, -100.5, 1.0),
+            material: materials.add(StandardMaterial {
+                base_color: Color::srgb(0.8, 0.8, 0.0),
+                metallic: 0.0,
+                ..default()
+            }),
             // Making the rasterized version invisible
             visibility: Visibility::Hidden,
             ..default()
@@ -87,14 +92,58 @@ fn setup(
         bevy_transform_gizmo::GizmoTransformable,
     ));
 
-    // "World" Sphere
     commands.spawn((
-        RaytracedSphere { radius: 500.0 },
+        RaytracedSphere { radius: 0.5 },
         Name::from("Raytraced Sphere"),
         PbrBundle {
+            // This mesh is only for picking
             mesh: meshes.add(Sphere::new(1.0)),
-            transform: Transform::from_xyz(0.0, -500.5, 0.0),
-            material: materials.add(Color::srgb(0.1, 0.9, 0.1)),
+            transform: Transform::from_xyz(0.0, 0.0, 0.8),
+            material: materials.add(StandardMaterial {
+                base_color: Color::srgb(0.1, 0.2, 0.5),
+                metallic: 0.0,
+                ..default()
+            }),
+            // Making the rasterized version invisible
+            visibility: Visibility::Hidden,
+            ..default()
+        },
+        bevy_mod_picking::PickableBundle::default(),
+        bevy_transform_gizmo::GizmoTransformable,
+    ));
+
+    commands.spawn((
+        RaytracedSphere { radius: 0.5 },
+        Name::from("Raytraced Sphere"),
+        PbrBundle {
+            // This mesh is only for picking
+            mesh: meshes.add(Sphere::new(1.0)),
+            transform: Transform::from_xyz(-1.0, 0.0, 1.0),
+            material: materials.add(StandardMaterial {
+                base_color: Color::srgb(0.8, 0.8, 0.8),
+                metallic: 1.0,
+                ..default()
+            }),
+            // Making the rasterized version invisible
+            visibility: Visibility::Hidden,
+            ..default()
+        },
+        bevy_mod_picking::PickableBundle::default(),
+        bevy_transform_gizmo::GizmoTransformable,
+    ));
+
+    commands.spawn((
+        RaytracedSphere { radius: 0.5 },
+        Name::from("Raytraced Sphere"),
+        PbrBundle {
+            // This mesh is only for picking
+            mesh: meshes.add(Sphere::new(1.0)),
+            transform: Transform::from_xyz(1.0, 0.0, 1.0),
+            material: materials.add(StandardMaterial {
+                base_color: Color::srgb(0.8, 0.6, 0.2),
+                metallic: 1.0,
+                ..default()
+            }),
             // Making the rasterized version invisible
             visibility: Visibility::Hidden,
             ..default()

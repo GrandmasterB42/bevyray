@@ -155,6 +155,7 @@ impl ExtractComponent for RaytracedSphereExtract {
 #[derive(Clone, Component, ShaderType)]
 pub struct RaytraceMaterial {
     base_color: Vec3,
+    metallic: f32,
 }
 
 impl RenderAsset for RaytraceMaterial {
@@ -167,7 +168,11 @@ impl RenderAsset for RaytraceMaterial {
         _param: &mut bevy::ecs::system::SystemParamItem<Self::Param>,
     ) -> Result<Self, bevy::render::render_asset::PrepareAssetError<Self::SourceAsset>> {
         let base_color = source_asset.base_color.to_linear().to_vec3();
-        Ok(RaytraceMaterial { base_color })
+        let metallic = source_asset.metallic;
+        Ok(RaytraceMaterial {
+            base_color,
+            metallic,
+        })
     }
 }
 

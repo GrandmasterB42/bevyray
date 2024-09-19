@@ -54,6 +54,7 @@ struct Sphere {
 @group(1) @binding(1) var<storage, read_write> material_buffer: array<Material>;
 struct Material {
     base_color: vec3<f32>,
+    metallic: f32,
 }
 
 const PI: f32 = 3.141592653589793;
@@ -153,8 +154,8 @@ fn raytrace(base_ray: Ray, state: ptr<private, u32>) -> RaytraceResult {
     }
 
     var first_depth: f32 = INF;
-    var ray_color: vec3<f32> = vec3<f32>(1.0, 1.0, 1.0); // Start with full white intensity
-    var attenuation: f32 = 0.5; // Initial attenuation factor for each bounce
+    var ray_color: vec3<f32> = vec3<f32>(1.0, 1.0, 1.0);
+    var lightSourceColor: vec3<f32> = vec3<f32>(0.0, 0.0, 0.0);
 
     var bounce_count: u32 = 0;
     for (; bounce_count <= camera.bounce_count; bounce_count++) {
@@ -165,16 +166,13 @@ fn raytrace(base_ray: Ray, state: ptr<private, u32>) -> RaytraceResult {
         }
 
         if hit.distance == INF {
-            ray_color *= attenuation * background_gradient(ray);
+            lightSourceColor = background_gradient(ray);
             break;
         }
 
+        let material = material_buffer[hit.object];
+        let attenuation = scatter(material, &ray, hit, state);
         ray_color *= attenuation;
-
-        ray.origin = hit.position;
-        ray.direction = hit.normal + randomUnitVec3(state);
-
-        attenuation *= 0.5;
     }
 
     // A extra bounce could be added -> the break wasn't hit
@@ -182,16 +180,35 @@ fn raytrace(base_ray: Ray, state: ptr<private, u32>) -> RaytraceResult {
         ray_color = vec3<f32>(0.0, 0.0, 0.0);
     }
 
-    if first_depth == INF {
-        return RaytraceResult(background_gradient(ray), fallback_far);
+    if bounce_count == 0 {
+        first_depth = fallback_far;
     }
-    return RaytraceResult(linear_to_gamma_Vec3(ray_color), first_depth);
+
+    return RaytraceResult(linear_to_gamma_Vec3(ray_color * lightSourceColor), first_depth);
 }
 
 fn linear_to_gamma_Vec3(in: vec3<f32>) -> vec3<f32> {
     return vec3<f32>(sqrt(in.x), sqrt(in.y), sqrt(in.z));
 }
 
+fn scatter(material: Material, scattered: ptr<function, Ray>, hit: HitInfo, state: ptr<private, u32>) -> vec3<f32> {
+    if rngNextFloat(state) < material.metallic {
+        // metallic interaction
+        let reflected = reflect((*scattered).direction, hit.normal);
+        *scattered = Ray(hit.position, reflected);
+        return material.base_color;
+    } else {
+        // non-metallic interaction
+        var scatter_direction = hit.normal + randomUnitVec3(state);
+
+        if vec3_near_zero(scatter_direction) {
+            scatter_direction = hit.normal;
+        }
+
+        *scattered = Ray(hit.position, scatter_direction);
+        return material.base_color;
+    }
+}
 
 struct HitInfo {
     distance: f32,
@@ -206,7 +223,7 @@ fn raycast(ray: Ray) -> HitInfo {
         let sphere = geometry_buffer[geometry_index];
 
         let hit_distance = hit_sphere(sphere, ray);
-        if hit_distance != -1.0 && hit_distance > 0.001 {
+        if hit_distance != -1.0 && hit_distance > 0.0001 {
             if hit_distance < closest.distance {
                 let hit_position = ray_at(ray, hit_distance);
                 let normal = normalize(hit_position - sphere.position);
@@ -239,6 +256,14 @@ fn hit_sphere(sphere: Sphere, ray: Ray) -> f32 {
     }
 }
 
+fn reflect(vector: vec3<f32>, normal: vec3<f32>) -> vec3<f32> {
+    return vector - 2 * dot(vector, normal) * normal;
+}
+
+fn vec3_near_zero(vector: vec3<f32>) -> bool {
+    let s = 1e-8;
+    return abs(vector.x) < s && abs(vector.y) < s && abs(vector.z) < s;
+}
 
 // https://github.com/gnikoloff/webgpu-raytracer/blob/3bdad829c536b530ba98c396dc11d08002427b41/src/shaders/utils/utils.ts#L10
 
