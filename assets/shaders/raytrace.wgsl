@@ -20,6 +20,7 @@
 #import bevy_core_pipeline::fullscreen_vertex_shader::FullscreenVertexOutput
 
 #import "shaders/random.wgsl"::{rngNextFloat, randomUnitVec3}
+#import "shaders/const.wgsl"::{PI, INF}
 
 @group(0) @binding(0) var screen_texture: texture_2d<f32>;
 @group(0) @binding(1) var texture_sampler: sampler;
@@ -72,9 +73,6 @@ struct Material {
     // transmission through a material via refraction
     specular_transmission: f32
 }
-
-const PI: f32 = 3.141592653589793;
-const INF: f32 = 3.40282e+38;
 
 var<private> rng_state: u32;
 
