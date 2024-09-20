@@ -62,6 +62,7 @@ impl Plugin for RaytracePlugin {
                 Core3d,
                 // Specify the node ordering.
                 // This will automatically create all required node edges to enforce the given ordering.
+                // NOTE: Should this be done before tonemapping?
                 (
                     Node3d::Tonemapping,
                     RaytraceLabel,

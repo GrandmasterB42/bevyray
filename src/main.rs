@@ -7,6 +7,7 @@ use bevy_mod_picking::{
     DefaultPickingPlugins,
 };
 use bevy_transform_gizmo::TransformGizmoPlugin;
+use rand::random;
 use raytracing::{RaytracePlugin, RaytracedCamera, RaytracedSphere, Raytracing};
 
 mod raytracing;
@@ -50,8 +51,8 @@ fn setup(
         Name::new("Raytraced Camera"),
         RaytracedCamera {
             level: Raytracing::FallbackRaytraced,
-            sample_count: 16,
-            bounces: 8,
+            sample_count: 4,
+            bounces: 4,
             // TODO: This is temporary and only here because it is easy to implement
             height: 0,
         },
@@ -71,122 +72,159 @@ fn setup(
         bevy_transform_gizmo::GizmoTransformable,
     ));
 
-    // Spheres
-    commands.spawn((
-        RaytracedSphere { radius: 100.0 },
-        Name::from("Raytraced Sphere"),
-        PbrBundle {
-            // This mesh is only for picking
-            mesh: meshes.add(Sphere::new(1.0)),
-            transform: Transform::from_xyz(0.0, -100.5, 1.0),
-            material: materials.add(StandardMaterial {
-                base_color: Color::srgb(0.8, 0.8, 0.0),
-                metallic: 0.0,
-                ..default()
-            }),
-            // Making the rasterized version invisible
-            visibility: Visibility::Hidden,
-            ..default()
-        },
-        bevy_mod_picking::PickableBundle::default(),
-        bevy_transform_gizmo::GizmoTransformable,
-    ));
-
-    commands.spawn((
-        RaytracedSphere { radius: 0.5 },
-        Name::from("Raytraced Sphere"),
-        PbrBundle {
-            // This mesh is only for picking
-            mesh: meshes.add(Sphere::new(1.0)),
-            transform: Transform::from_xyz(0.0, 0.0, 0.8),
-            material: materials.add(StandardMaterial {
-                base_color: Color::srgb(0.1, 0.2, 0.5),
-                metallic: 0.0,
-                ..default()
-            }),
-            // Making the rasterized version invisible
-            visibility: Visibility::Hidden,
-            ..default()
-        },
-        bevy_mod_picking::PickableBundle::default(),
-        bevy_transform_gizmo::GizmoTransformable,
-    ));
-
-    commands.spawn((
-        RaytracedSphere { radius: 0.5 },
-        Name::from("Raytraced Sphere"),
-        PbrBundle {
-            // This mesh is only for picking
-            mesh: meshes.add(Sphere::new(1.0)),
-            transform: Transform::from_xyz(-1.0, 0.0, 1.0),
-            material: materials.add(StandardMaterial {
-                base_color: Color::srgb(0.8, 0.8, 0.8),
-                metallic: 0.0,
-                perceptual_roughness: 0.0,
-                specular_transmission: 1.0,
-                ior: 1.5,
-                ..default()
-            }),
-            // Making the rasterized version invisible
-            visibility: Visibility::Hidden,
-            ..default()
-        },
-        bevy_mod_picking::PickableBundle::default(),
-        bevy_transform_gizmo::GizmoTransformable,
-    ));
-
-    commands.spawn((
-        RaytracedSphere { radius: 0.4 },
-        Name::from("Raytraced Sphere"),
-        PbrBundle {
-            // This mesh is only for picking
-            mesh: meshes.add(Sphere::new(1.0)),
-            transform: Transform::from_xyz(-1.0, 0.0, 1.0),
-            material: materials.add(StandardMaterial {
-                base_color: Color::srgb(0.8, 0.8, 0.8),
-                metallic: 0.0,
-                perceptual_roughness: 0.0,
-                specular_transmission: 1.0,
-                ior: 1.0 / 1.5,
-                ..default()
-            }),
-            // Making the rasterized version invisible
-            visibility: Visibility::Hidden,
-            ..default()
-        },
-        bevy_mod_picking::PickableBundle::default(),
-        bevy_transform_gizmo::GizmoTransformable,
-    ));
-
-    commands.spawn((
-        RaytracedSphere { radius: 0.5 },
-        Name::from("Raytraced Sphere"),
-        PbrBundle {
-            // This mesh is only for picking
-            mesh: meshes.add(Sphere::new(1.0)),
-            transform: Transform::from_xyz(1.0, 0.0, 1.0),
-            material: materials.add(StandardMaterial {
-                base_color: Color::srgb(0.8, 0.6, 0.2),
-                metallic: 1.0,
-                perceptual_roughness: 1.0,
-                ..default()
-            }),
-            // Making the rasterized version invisible
-            visibility: Visibility::Hidden,
-            ..default()
-        },
-        bevy_mod_picking::PickableBundle::default(),
-        bevy_transform_gizmo::GizmoTransformable,
-    ));
-
-    // light
-    commands.spawn(DirectionalLightBundle {
-        directional_light: DirectionalLight {
-            illuminance: 1_000.,
-            ..default()
-        },
+    let ground_material = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.5, 0.5, 0.5),
+        metallic: 0.0,
         ..default()
     });
+    commands.spawn((
+        PbrBundle {
+            mesh: meshes.add(Sphere::new(1000.0)),
+            material: ground_material,
+            transform: Transform::from_xyz(0.0, -1000.0, 0.0),
+            visibility: Visibility::Hidden,
+            ..default()
+        },
+        RaytracedSphere { radius: 1000.0 },
+        bevy_mod_picking::PickableBundle::default(),
+        bevy_transform_gizmo::GizmoTransformable,
+    ));
+
+    for a in -11..=11 {
+        for b in -11..11 {
+            let choose_mat = random::<f32>();
+            let center_v = Vec3::new(
+                a as f32 + 0.9 * random::<f32>(),
+                0.2,
+                b as f32 + 0.9 * random::<f32>(),
+            );
+            let center = Transform::from_xyz(center_v.x, center_v.y, center_v.z);
+
+            if (center_v - Vec3::new(4.0, 0.2, 0.0)).length() > 0.9 {
+                if choose_mat < 0.8 {
+                    // diffuse
+                    let albedo = Vec3::new(random(), random(), random())
+                        * Vec3::new(random(), random(), random());
+                    let sphere_material = materials.add(StandardMaterial {
+                        base_color: Color::srgb_from_array(albedo.to_array()),
+                        metallic: 0.0,
+                        ..default()
+                    });
+                    commands.spawn((
+                        PbrBundle {
+                            mesh: meshes.add(Sphere::new(0.2)),
+                            material: sphere_material,
+                            transform: center,
+                            visibility: Visibility::Hidden,
+                            ..default()
+                        },
+                        RaytracedSphere { radius: 0.2 },
+                        bevy_mod_picking::PickableBundle::default(),
+                        bevy_transform_gizmo::GizmoTransformable,
+                    ));
+                } else if choose_mat < 0.95 {
+                    // metal
+                    let albedo = Vec3::new(random(), random(), random());
+                    let roughness = random();
+                    let sphere_material = materials.add(StandardMaterial {
+                        base_color: Color::srgb_from_array(albedo.to_array()),
+                        metallic: 1.0,
+                        perceptual_roughness: roughness,
+                        ..default()
+                    });
+                    commands.spawn((
+                        PbrBundle {
+                            mesh: meshes.add(Sphere::new(0.2)),
+                            material: sphere_material,
+                            transform: center,
+                            visibility: Visibility::Hidden,
+                            ..default()
+                        },
+                        RaytracedSphere { radius: 0.2 },
+                        bevy_mod_picking::PickableBundle::default(),
+                        bevy_transform_gizmo::GizmoTransformable,
+                    ));
+                } else {
+                    // glass
+                    let sphere_material = materials.add(StandardMaterial {
+                        metallic: 0.0,
+                        ior: 1.5,
+                        specular_transmission: 1.0,
+                        ..default()
+                    });
+                    commands.spawn((
+                        PbrBundle {
+                            mesh: meshes.add(Sphere::new(0.2)),
+                            material: sphere_material,
+                            transform: center,
+                            visibility: Visibility::Hidden,
+                            ..default()
+                        },
+                        RaytracedSphere { radius: 0.2 },
+                        bevy_mod_picking::PickableBundle::default(),
+                        bevy_transform_gizmo::GizmoTransformable,
+                    ));
+                }
+            }
+        }
+    }
+
+    // big spheres
+    let sphere_material = materials.add(StandardMaterial {
+        metallic: 0.0,
+        ior: 1.5,
+        specular_transmission: 1.0,
+        ..default()
+    });
+    commands.spawn((
+        PbrBundle {
+            mesh: meshes.add(Sphere::new(1.0)),
+            material: sphere_material,
+            transform: Transform::from_xyz(0.0, 1.0, 0.0),
+            visibility: Visibility::Hidden,
+            ..default()
+        },
+        RaytracedSphere { radius: 1.0 },
+        bevy_mod_picking::PickableBundle::default(),
+        bevy_transform_gizmo::GizmoTransformable,
+    ));
+
+    let sphere_material = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.4, 0.2, 0.1),
+        metallic: 0.0,
+        ..default()
+    });
+    commands.spawn((
+        PbrBundle {
+            mesh: meshes.add(Sphere::new(1.0)),
+            material: sphere_material,
+            transform: Transform::from_xyz(-4.0, 1.0, 0.0),
+            visibility: Visibility::Hidden,
+            ..default()
+        },
+        RaytracedSphere { radius: 1.0 },
+        bevy_mod_picking::PickableBundle::default(),
+        bevy_transform_gizmo::GizmoTransformable,
+    ));
+
+    let sphere_material = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.7, 0.6, 0.5),
+        metallic: 1.0,
+        perceptual_roughness: 0.0,
+        ..default()
+    });
+    commands.spawn((
+        PbrBundle {
+            mesh: meshes.add(Sphere::new(1.0)),
+            material: sphere_material,
+            transform: Transform::from_xyz(4.0, 1.0, 0.0),
+            visibility: Visibility::Hidden,
+            ..default()
+        },
+        RaytracedSphere { radius: 1.0 },
+        bevy_mod_picking::PickableBundle::default(),
+        bevy_transform_gizmo::GizmoTransformable,
+    ));
 }
 
 // The gizmo camera copies the main camera, but the clear color messes up the modified render pipeline
@@ -220,7 +258,7 @@ fn sync_picking_radius(
     }
 }
 
-// TODO: This is a terrible hack, cahnge this
+// TODO: This is a terrible hack, change this
 fn temporary_change_this(window: Query<&Window>, mut camera: Query<&mut RaytracedCamera>) {
     let Ok(window) = window.get_single() else {
         return;
