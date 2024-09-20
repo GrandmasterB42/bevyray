@@ -51,14 +51,14 @@ struct Window {
     height: u32,
 }
 
-@group(1) @binding(0) var<storage, read_write> geometry_buffer: array<Sphere>;
+@group(1) @binding(0) var<storage, read> geometry_buffer: array<Sphere>;
 struct Sphere {
     position: vec3<f32>,
     radius: f32,
     material_id: u32,
 }
 
-@group(1) @binding(1) var<storage, read_write> material_buffer: array<Material>;
+@group(1) @binding(1) var<storage, read> material_buffer: array<Material>;
 struct Material {
     // Doubles as diffuse albedo for non-metallic, specular for metallic and a mix for everything in between
     base_color: vec3<f32>,
