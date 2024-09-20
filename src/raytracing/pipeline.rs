@@ -21,7 +21,7 @@ use bevy::{
     },
 };
 
-use super::extract::{CameraExtract, GeometryBuffer, MaterialBuffer, RayTraceLevelExtract};
+use super::extract::{CameraExtract, GeometryBuffer, MaterialBuffer, RaytraceLevelExtract};
 // The post process node used for the render graph
 #[derive(Default)]
 pub struct RayTracingNode;
@@ -37,10 +37,10 @@ impl ViewNode for RayTracingNode {
         // The Prepass textures (depth used for blending between raster and raytraced)
         &'static ViewPrepassTextures,
         // This makes sure the node only runs on cameras with the PostProcessSettings component
-        &'static RayTraceLevelExtract,
+        &'static RaytraceLevelExtract,
         // As there could be multiple post processing components sent to the GPU (one per camera),
         // we need to get the index of the one that is associated with the current view.
-        &'static DynamicUniformIndex<RayTraceLevelExtract>,
+        &'static DynamicUniformIndex<RaytraceLevelExtract>,
         // The camera data
         &'static CameraExtract,
         &'static DynamicUniformIndex<CameraExtract>,
@@ -78,7 +78,7 @@ impl ViewNode for RayTracingNode {
         };
 
         // Get the settings uniform binding
-        let settings_uniforms = world.resource::<ComponentUniforms<RayTraceLevelExtract>>();
+        let settings_uniforms = world.resource::<ComponentUniforms<RaytraceLevelExtract>>();
         let Some(settings_binding) = settings_uniforms.uniforms().binding() else {
             return Ok(());
         };
@@ -222,7 +222,7 @@ impl FromWorld for RaytracingPipeline {
                     // The sampler that will be used to sample the depth texture
                     sampler(SamplerBindingType::NonFiltering),
                     // The Level uniform that will control the blending
-                    uniform_buffer::<RayTraceLevelExtract>(true),
+                    uniform_buffer::<RaytraceLevelExtract>(true),
                     // The camera uniform
                     uniform_buffer::<CameraExtract>(true),
                 ),

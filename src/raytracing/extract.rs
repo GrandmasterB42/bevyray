@@ -29,7 +29,7 @@ impl Plugin for RaytraceExtractPlugin {
             // The settings will also be the data used in the shader.
             // This plugin will prepare the component for the GPU by creating a uniform buffer
             // and writing the data to that buffer every frame.
-            UniformComponentPlugin::<RayTraceLevelExtract>::default(),
+            UniformComponentPlugin::<RaytraceLevelExtract>::default(),
             UniformComponentPlugin::<CameraExtract>::default(),
             // Transforming Assets
             RenderAssetPlugin::<RaytraceMaterial>::default(),
@@ -68,7 +68,7 @@ pub struct CameraExtract {
 
 // This is the component that will get passed to the shader
 #[derive(Component, Default, Clone, Copy, ShaderType)]
-pub struct RayTraceLevelExtract {
+pub struct RaytraceLevelExtract {
     level: u32,
 }
 
@@ -82,7 +82,7 @@ impl ExtractComponent for RaytracedCamera {
 
     type QueryFilter = ();
 
-    type Out = (RayTraceLevelExtract, CameraExtract);
+    type Out = (RaytraceLevelExtract, CameraExtract);
 
     fn extract_component(item: QueryItem<'_, Self::QueryData>) -> Option<Self::Out> {
         let camera = item.0;
@@ -123,7 +123,7 @@ impl ExtractComponent for RaytracedCamera {
             Projection::Orthographic(OrthographicProjection { .. }) => return None,
         };
 
-        let level = RayTraceLevelExtract {
+        let level = RaytraceLevelExtract {
             level: camera.level as u32,
         };
 
@@ -183,7 +183,7 @@ impl RenderAsset for RaytraceMaterial {
 }
 
 #[derive(ShaderType)]
-pub struct RayTraceSphere {
+pub struct RaytraceSphere {
     position: Vec3,
     radius: f32,
     material_id: u32,
@@ -191,7 +191,7 @@ pub struct RayTraceSphere {
 
 // This seems dumb | There is probably a better way to send data to the gpu (maybe also only the stuff that changed)
 #[derive(Resource, Default, Deref)]
-pub struct GeometryBuffer(std::sync::Mutex<StorageBuffer<Vec<RayTraceSphere>>>);
+pub struct GeometryBuffer(std::sync::Mutex<StorageBuffer<Vec<RaytraceSphere>>>);
 
 #[derive(Resource, Default, Deref)]
 pub struct MaterialBuffer(std::sync::Mutex<StorageBuffer<Vec<RaytraceMaterial>>>);
@@ -217,7 +217,7 @@ pub fn prepare_buffers(
         // TODO: Intergrate this with change detection so these buffers don't get replaced every frame
         all_materials.push(material.clone());
 
-        all_spheres.push(RayTraceSphere {
+        all_spheres.push(RaytraceSphere {
             position: sphere.position,
             radius: sphere.radius,
             material_id: index as u32,
