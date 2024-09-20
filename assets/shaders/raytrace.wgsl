@@ -31,7 +31,6 @@ struct RaytraceLevel {
 }
 @group(0) @binding(5) var<uniform> camera: Camera;
 struct Camera {
-    random_seed: f32,
     sample_count: u32,
     bounce_count: u32,
     // 0 -> perspective; 1 -> orthographic
@@ -40,10 +39,15 @@ struct Camera {
     far: f32,
     fov: f32,
     aspect: f32,
-    height: u32,
     position: vec3<f32>,
     direction: vec3<f32>,
     up: vec3<f32>,
+}
+
+@group(0) @binding(6) var<uniform> window: Window;
+struct Window {
+    random_seed: f32,
+    height: u32,
 }
 
 @group(1) @binding(0) var<storage, read_write> geometry_buffer: array<Sphere>;
@@ -76,7 +80,7 @@ var<private> rng_state: u32;
 
 @fragment
 fn fragment(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
-    rng_state = u32((camera.random_seed * 10000.0) * (in.uv.x * 402.0) * (in.uv.y * 31.5)) ;
+    rng_state = u32((window.random_seed * 10000.0) * (in.uv.x * 402.0) * (in.uv.y * 31.5)) ;
     // Skip Raytracing
     if settings.level == 0 {
         return textureSample(screen_texture, texture_sampler, in.uv);
@@ -122,8 +126,8 @@ struct RaytraceResult {
 
 fn random_ray_from_uv(uv: vec2<f32>, state: ptr<private, u32>) -> Ray {
     let rand_square = vec2<f32>(rngNextFloat(state) - 0.5, rngNextFloat(state) - 0.5);
-    let height = f32(camera.height);
-    let width = f32(camera.height) * camera.aspect;
+    let height = f32(window.height);
+    let width = f32(window.height) * camera.aspect;
     let delta_u = (1.0 / width) * rand_square.x;
     let delta_v = (1.0 / height) * rand_square.y;
 

@@ -21,7 +21,9 @@ use bevy::{
     },
 };
 
-use super::extract::{CameraExtract, GeometryBuffer, MaterialBuffer, RaytraceLevelExtract};
+use super::extract::{
+    CameraExtract, GeometryBuffer, MaterialBuffer, RaytraceLevelExtract, WindowExtract,
+};
 // The post process node used for the render graph
 #[derive(Default)]
 pub struct RayTracingNode;
@@ -57,9 +59,14 @@ impl ViewNode for RayTracingNode {
         &self,
         _graph: &mut RenderGraphContext,
         render_context: &mut RenderContext,
-        (view_target, prepass_textures, _raytrace_level, settings_index, _camera, camera_index): QueryItem<
-            Self::ViewQuery,
-        >,
+        (
+            view_target,
+            prepass_textures,
+            _raytrace_level,
+            settings_index,
+            _camera,
+            camera_index,
+        ): QueryItem<Self::ViewQuery>,
         world: &World,
     ) -> Result<(), NodeRunError> {
         // Get the pipeline resource that contains the global data we need
@@ -86,6 +93,11 @@ impl ViewNode for RayTracingNode {
         // Get the camera uniform binding
         let camera_uniforms = world.resource::<ComponentUniforms<CameraExtract>>();
         let Some(camera_binding) = camera_uniforms.uniforms().binding() else {
+            return Ok(());
+        };
+
+        let window_uniforms = world.resource::<ComponentUniforms<WindowExtract>>();
+        let Some(window_binding) = window_uniforms.uniforms().binding() else {
             return Ok(());
         };
 
@@ -150,6 +162,8 @@ impl ViewNode for RayTracingNode {
                 settings_binding.clone(),
                 // Camera data
                 camera_binding.clone(),
+                // Window data
+                window_binding.clone(),
             )),
         );
 
@@ -177,7 +191,7 @@ impl ViewNode for RayTracingNode {
         // This is mostly just wgpu boilerplate for drawing a fullscreen triangle,
         // using the pipeline/bind_group created above
         render_pass.set_render_pipeline(pipeline);
-        // By passing in the index of the post process settings on this view, we ensure
+        // By passing in the index of the settings on this view, we ensure
         // that in the event that multiple settings were sent to the GPU (as would be the
         // case with multiple cameras), we use the correct one.
         render_pass.set_bind_group(
@@ -225,6 +239,8 @@ impl FromWorld for RaytracingPipeline {
                     uniform_buffer::<RaytraceLevelExtract>(true),
                     // The camera uniform
                     uniform_buffer::<CameraExtract>(true),
+                    // The window uniform
+                    uniform_buffer::<WindowExtract>(false),
                 ),
             ),
         );

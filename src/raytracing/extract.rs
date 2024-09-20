@@ -21,20 +21,20 @@ impl Plugin for RaytraceExtractPlugin {
             // be extracted to the render world every frame.
             // This makes it possible to control the effect from the main world.
             // This plugin will take care of extracting it automatically.
-            // It's important to derive [`ExtractComponent`] on [`PostProcessingSettings`]
-            // for this plugin to work correctly.
-            ExtractComponentPlugin::<RaytracedCamera>::default(),
+            ExtractComponentPlugin::<CameraExtract>::default(),
+            ExtractComponentPlugin::<WindowExtract>::default(),
             // Extracting the Geometry from the main world
             ExtractComponentPlugin::<RaytracedSphereExtract>::default(),
+            // Taking the handles along to populate the buffers
+            ExtractComponentPlugin::<Handle<StandardMaterial>>::default(),
             // The settings will also be the data used in the shader.
             // This plugin will prepare the component for the GPU by creating a uniform buffer
             // and writing the data to that buffer every frame.
             UniformComponentPlugin::<RaytraceLevelExtract>::default(),
             UniformComponentPlugin::<CameraExtract>::default(),
+            UniformComponentPlugin::<WindowExtract>::default(),
             // Transforming Assets
             RenderAssetPlugin::<RaytraceMaterial>::default(),
-            // Taking the handles along to populate the buffers
-            ExtractComponentPlugin::<Handle<StandardMaterial>>::default(),
         ));
 
         let Some(render_app) = app.get_sub_app_mut(RenderApp) else {
@@ -48,9 +48,35 @@ impl Plugin for RaytraceExtractPlugin {
     }
 }
 
-#[derive(Component, Default, Clone, Copy, ShaderType)]
-pub struct CameraExtract {
+// This solution is fine for now, but cameras can also render to other places that aren't bound by this height
+// At that point the uniform position needs to be dynamic again and the extraction has to look different
+#[derive(Component, Default, Clone, ShaderType)]
+pub struct WindowExtract {
     random_seed: f32,
+    height: u32,
+}
+
+impl ExtractComponent for WindowExtract {
+    type QueryData = &'static Window;
+
+    type QueryFilter = ();
+
+    type Out = Self;
+
+    fn extract_component(item: QueryItem<'_, Self::QueryData>) -> Option<Self::Out> {
+        // TODO: This is probably a bad idea but other solutions needed mutable acces
+        let mut rng = thread_rng();
+        let random_seed: f32 = rng.gen_range(0.0..1.0);
+
+        Some(WindowExtract {
+            random_seed,
+            height: item.physical_height(),
+        })
+    }
+}
+
+#[derive(Component, Default, Clone, ShaderType)]
+pub struct CameraExtract {
     sample_count: u32,
     bounce_count: u32,
     // 0 -> perspective; rest not supported
@@ -60,7 +86,6 @@ pub struct CameraExtract {
     fov: f32,
     // width / height
     aspect: f32,
-    height: u32,
     position: Vec3,
     direction: Vec3,
     up: Vec3,
@@ -73,7 +98,7 @@ pub struct RaytraceLevelExtract {
 }
 
 // Turning the marker into something the GPU can use
-impl ExtractComponent for RaytracedCamera {
+impl ExtractComponent for CameraExtract {
     type QueryData = (
         &'static RaytracedCamera,
         &'static GlobalTransform,
@@ -100,12 +125,7 @@ impl ExtractComponent for RaytracedCamera {
                 let direction = transform.forward().as_vec3();
                 let up = transform.up().as_vec3();
 
-                // TODO: This is probably a bad idea but other solutions needed mutable acces
-                let mut rng = thread_rng();
-                let random_seed: f32 = rng.gen_range(0.0..1.0);
-
                 CameraExtract {
-                    random_seed,
                     sample_count: camera.sample_count,
                     bounce_count: camera.bounces,
                     projection: 0,
@@ -116,7 +136,6 @@ impl ExtractComponent for RaytracedCamera {
                     position,
                     direction,
                     up,
-                    height: camera.height,
                 }
             }
             // Currently unsupported

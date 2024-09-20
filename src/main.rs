@@ -26,7 +26,6 @@ fn main() {
         ))
         .add_systems(Startup, (setup, modify_raycast_backend))
         .add_systems(Update, sync_picking_radius)
-        .add_systems(PostUpdate, temporary_change_this)
         .add_systems(Last, remove_transform_gizmo_clear)
         .run();
 }
@@ -53,8 +52,6 @@ fn setup(
             level: Raytracing::FallbackRaytraced,
             sample_count: 4,
             bounces: 4,
-            // TODO: This is temporary and only here because it is easy to implement
-            height: 0,
         },
         bevy_transform_gizmo::GizmoPickSource::default(),
         FlyCam,
@@ -255,15 +252,5 @@ fn sync_picking_radius(
 ) {
     for (sphere, mut transform) in sync_items.iter_mut() {
         transform.scale = Vec3::splat(sphere.radius);
-    }
-}
-
-// TODO: This is a terrible hack, change this
-fn temporary_change_this(window: Query<&Window>, mut camera: Query<&mut RaytracedCamera>) {
-    let Ok(window) = window.get_single() else {
-        return;
-    };
-    for mut camera in camera.iter_mut() {
-        camera.height = window.physical_height();
     }
 }

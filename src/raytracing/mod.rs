@@ -88,8 +88,6 @@ pub struct RaytracedCamera {
     pub level: Raytracing,
     pub sample_count: u32,
     pub bounces: u32,
-    // TODO: This is temporary and only here because it is easy to implement
-    pub height: u32,
 }
 
 // This is a marker component that specifies the raytracing level for a camera
