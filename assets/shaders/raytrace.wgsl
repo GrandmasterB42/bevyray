@@ -19,6 +19,8 @@
 // You don't need to worry about this too much since bevy will compute the correct UVs for you.
 #import bevy_core_pipeline::fullscreen_vertex_shader::FullscreenVertexOutput
 
+#import "shaders/random.wgsl"::{rngNextFloat, randomUnitVec3}
+
 @group(0) @binding(0) var screen_texture: texture_2d<f32>;
 @group(0) @binding(1) var texture_sampler: sampler;
 @group(0) @binding(2) var depth_texture: texture_depth_2d;
@@ -223,7 +225,7 @@ fn scatter(material: Material, scattered: ptr<function, Ray>, attenuation: ptr<f
         *scattered = Ray(hit.position, reflected);
         *attenuation = material.base_color;
 
-        // Discord below surface
+        // Discard below surface
         return dot((*scattered).direction, hit.normal) < 0;
     } else {
         // non-metallic interaction
@@ -349,40 +351,4 @@ fn reflectance(cosine: f32, refraction_index: f32) -> f32 {
 fn vec3_near_zero(vector: vec3<f32>) -> bool {
     let s = 1e-8;
     return abs(vector.x) < s && abs(vector.y) < s && abs(vector.z) < s;
-}
-
-// https://github.com/gnikoloff/webgpu-raytracer/blob/3bdad829c536b530ba98c396dc11d08002427b41/src/shaders/utils/utils.ts#L10
-
-fn rngNextFloat(state: ptr<private, u32>) -> f32 {
-    rngNextInt(state);
-    return f32(*state) / f32(0xffffffffu);
-}
-
-fn rngNextInt(state: ptr<private, u32>) {
-    // PCG random number generator
-    // Based on https://www.shadertoy.com/view/XlGcRh
-
-    let oldState = *state + 747796405u + 2891336453u;
-    let word = ((oldState >> ((oldState >> 28u) + 4u)) ^ oldState) * 277803737u;
-    *state = (word >> 22u) ^ word;
-}
-
-fn randomVec3InUnitSphere(state: ptr<private, u32>) -> vec3<f32> {
-    var p: vec3<f32>;
-    loop {
-        p = 2.0 * vec3<f32>(rngNextFloat(state), rngNextFloat(state), rngNextFloat(state)) - vec3<f32>(1.0);
-        if dot(p, p) <= 1.0 {
-            break;
-        }
-    }
-    return p;
-}
-
-fn randomUnitVec3(rngState: ptr<private, u32>) -> vec3<f32> {
-    return (randomVec3InUnitSphere(rngState));
-}
-
-fn randomUnitVec3OnHemisphere(normal: vec3<f32>, rngState: ptr<private, u32>) -> vec3<f32> {
-    let onUnitSphere = randomUnitVec3(rngState);
-    return select(-onUnitSphere, onUnitSphere, dot(onUnitSphere, normal) > 0.0);
 }
