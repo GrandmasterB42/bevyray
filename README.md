@@ -17,3 +17,4 @@
 - denoising
 - importance sampling
 - integrating with more bevy features
+- CI

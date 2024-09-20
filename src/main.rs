@@ -1,3 +1,7 @@
+//#![warn(clippy::pedantic)]
+#![allow(clippy::type_complexity)]
+#![allow(clippy::too_many_lines)]
+
 use bevy::prelude::*;
 use bevy_flycam::{FlyCam, NoCameraPlayerPlugin};
 use bevy_inspector_egui::quick::WorldInspectorPlugin;
@@ -250,7 +254,7 @@ fn modify_raycast_backend(mut settings: ResMut<RaycastBackendSettings>) {
 fn sync_picking_radius(
     mut sync_items: Query<(&RaytracedSphere, &mut Transform), Changed<RaytracedSphere>>,
 ) {
-    for (sphere, mut transform) in sync_items.iter_mut() {
+    for (sphere, mut transform) in &mut sync_items {
         transform.scale = Vec3::splat(sphere.radius);
     }
 }
