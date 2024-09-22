@@ -1,5 +1,8 @@
+use std::time::Duration;
+
 use bevy::{
     ecs::query::QueryItem,
+    math::Vec3A,
     prelude::*,
     render::{
         extract_component::{ExtractComponent, ExtractComponentPlugin, UniformComponentPlugin},
@@ -8,6 +11,7 @@ use bevy::{
         Render, RenderApp, RenderSet,
     },
 };
+use obvhs::{bvh2::builder::build_bvh2, Boundable, BvhBuildParams};
 use rand::{thread_rng, Rng};
 
 use super::{RaytracedCamera, RaytracedSphere};
@@ -42,8 +46,9 @@ impl Plugin for RaytraceExtractPlugin {
         };
 
         render_app
-            .init_resource::<GeometryBuffer>()
+            .init_resource::<ModelBuffer>()
             .init_resource::<MaterialBuffer>()
+            .init_resource::<BVHBuffer>()
             .add_systems(Render, prepare_buffers.in_set(RenderSet::PrepareResources));
     }
 }
@@ -201,31 +206,91 @@ impl RenderAsset for RaytraceMaterial {
     }
 }
 
-#[derive(ShaderType)]
-pub struct RaytraceSphere {
+// TODO: This becomes transform matrix, triangle_start, triangle_count and material
+// triangle actually points at the index buffer
+#[derive(ShaderType, Clone)]
+pub struct Model {
     position: Vec3,
     radius: f32,
     material_id: u32,
 }
 
-// This seems dumb | There is probably a better way to send data to the gpu (maybe also only the stuff that changed)
+impl Boundable for Model {
+    fn aabb(&self) -> obvhs::aabb::Aabb {
+        obvhs::aabb::Aabb::new(
+            Vec3A::from(self.position) - Vec3A::splat(self.radius),
+            Vec3A::from(self.position) + Vec3A::splat(self.radius),
+        )
+    }
+}
+
+#[derive(ShaderType, Debug)]
+pub struct BVHNode {
+    pub bounds_min: Vec3,
+    pub bounds_max: Vec3,
+    // is the model_index if it is a leaf node (model_count > 0)
+    // otherwise the first child index (second child directly after that)
+    pub index: u32,
+    pub model_count: u32,
+}
+
+/*
+#[derive(ShaderType)]
+pub struct ModelBVHNode {
+    bounds_min: Vec3,
+    bounds_max: Vec3,
+    // is the triangle_index if it is a leaf node (triangle_count > 0)
+    // otherwise the first child index (second child directly after that)
+    index: u32,
+    triangle_count: u32,
+}
+*/
+
+// There is probably a better way to send all these buffers to the gpu
 #[derive(Resource, Default, Deref)]
-pub struct GeometryBuffer(std::sync::Mutex<StorageBuffer<Vec<RaytraceSphere>>>);
+pub struct ModelBuffer(std::sync::Mutex<StorageBuffer<Vec<Model>>>);
 
 #[derive(Resource, Default, Deref)]
 pub struct MaterialBuffer(std::sync::Mutex<StorageBuffer<Vec<RaytraceMaterial>>>);
 
+// The BVH and ModelBVH are different buffers because the idea behind them is,
+// that the ModelBVHBuffer is in model local space and pretty much constant in its data
+// while the BVH is for the world and rebuilt every time stuff moves
+#[derive(Resource, Default, Deref)]
+pub struct BVHBuffer(std::sync::Mutex<StorageBuffer<Vec<BVHNode>>>);
+
+// Note: Bevy Builds Aabb's automatically | This probably needs to be inserted seperatly for my special meshes?
+// Todo: look into stuff like this for dynamic bvh:
+// https://gpuopen.com/download/publications/HPLOC.pdf
+// https://dl.acm.org/doi/pdf/10.1145/3543867
+
+/*
+#[derive(Resource, Default, Deref)]
+pub struct ModelBVHBuffer(std::sync::Mutex<StorageBuffer<Vec<ModelBVHNode>>>);
+
+#[derive(Resource, Default, Deref)]
+pub struct VertexBuffer(std::sync::Mutex<StorageBuffer<Vec<Vertex>>>);
+
+#[derive(Resource, Default, Deref)]
+pub struct IndexBuffer(std::sync::Mutex<StorageBuffer<Vec<u32>>>);
+*/
+
 pub fn prepare_buffers(
-    geometry_buffer: ResMut<GeometryBuffer>,
-    material_buffer: ResMut<MaterialBuffer>,
+    model_buffer: Res<ModelBuffer>,
+    material_buffer: Res<MaterialBuffer>,
+    bvh_buffer: Res<BVHBuffer>,
     data: Query<(&RaytracedSphereExtract, &Handle<StandardMaterial>)>,
     materials: Res<RenderAssets<RaytraceMaterial>>,
 ) {
-    let Ok(mut geometry_buffer) = geometry_buffer.lock() else {
+    let Ok(mut model_buffer) = model_buffer.lock() else {
         return;
     };
 
     let Ok(mut material_buffer) = material_buffer.lock() else {
+        return;
+    };
+
+    let Ok(mut bvh_buffer) = bvh_buffer.lock() else {
         return;
     };
 
@@ -236,13 +301,34 @@ pub fn prepare_buffers(
         // TODO: Intergrate this with change detection so these buffers don't get replaced every frame
         all_materials.push(material.clone());
 
-        all_spheres.push(RaytraceSphere {
+        all_spheres.push(Model {
             position: sphere.position,
             radius: sphere.radius,
             material_id: index as u32,
         });
     }
 
-    geometry_buffer.set(all_spheres);
+    let mut _bvh_build_time = Duration::new(0, 0);
+    let config = BvhBuildParams::fast_build();
+    let bvh = build_bvh2(&all_spheres, config, &mut _bvh_build_time);
+
+    // reorder spheres according to indcies
+    for (original_index, new_index) in bvh.primitive_indices.iter().enumerate() {
+        all_spheres.swap(original_index, *new_index as usize);
+    }
+
+    let bvh_nodes = bvh
+        .nodes
+        .into_iter()
+        .map(|node| BVHNode {
+            bounds_max: node.aabb.min.into(),
+            bounds_min: node.aabb.max.into(),
+            index: node.first_index,
+            model_count: node.prim_count,
+        })
+        .collect::<Vec<_>>();
+
+    model_buffer.set(all_spheres);
     material_buffer.set(all_materials);
+    bvh_buffer.set(bvh_nodes);
 }

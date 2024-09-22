@@ -51,8 +51,8 @@ struct Window {
     height: u32,
 }
 
-@group(1) @binding(0) var<storage, read> geometry_buffer: array<Sphere>;
-struct Sphere {
+@group(1) @binding(0) var<storage, read> model_buffer: array<Model>;
+struct Model {
     position: vec3<f32>,
     radius: f32,
     material_id: u32,
@@ -72,6 +72,16 @@ struct Material {
     ior: f32,
     // transmission through a material via refraction
     specular_transmission: f32
+}
+
+@group(1) @binding(2) var<storage, read> bvh_buffer: array<BVHNode>;
+struct BVHNode {
+    bounds_min: vec3<f32>,
+    bounds_max: vec3<f32>,
+    // is the model_index if it is a leaf node (model_count > 0)
+    // otherwise the first child index (second child directly after that
+    index: u32,
+    model_count: u32,
 }
 
 var<private> rng_state: u32;
@@ -174,6 +184,8 @@ fn raytrace(base_ray: Ray, state: ptr<private, u32>) -> RaytraceResult {
     var bounce_count: u32 = 0;
     for (; bounce_count <= camera.bounce_count; bounce_count++) {
         let hit = raycast(ray);
+        //var hit = HitInfo(INF, vec3<f32>(0.0, 0.0, 0.0), vec3<f32>(0.0, 0.0, 0.0), 0, true);
+        //raycast_against_range(ray, u32(0), arrayLength(&model_buffer), &hit);
 
         // Setting the depth for depth buffer comparison, this might have to be a early return at some point
         if bounce_count == 0 {
@@ -186,10 +198,8 @@ fn raytrace(base_ray: Ray, state: ptr<private, u32>) -> RaytraceResult {
             break;
         }
 
-        let material = material_buffer[hit.object];
-
         var attenuation: vec3<f32>;
-        let absorbed = scatter(material, &ray, &attenuation, hit, state);
+        let absorbed = scatter(&ray, &attenuation, hit, state);
 
         // rays getting absorbed
         if absorbed {
@@ -216,7 +226,9 @@ fn linear_to_gamma_Vec3(in: vec3<f32>) -> vec3<f32> {
 }
 
 // returns wether the ray was absorbed
-fn scatter(material: Material, scattered: ptr<function, Ray>, attenuation: ptr<function, vec3<f32>>, hit: HitInfo, state: ptr<private, u32>) -> bool {
+fn scatter(scattered: ptr<function, Ray>, attenuation: ptr<function, vec3<f32>>, hit: HitInfo, state: ptr<private, u32>) -> bool {
+    let material = material_buffer[hit.material];
+
     if rngNextFloat(state) < material.metallic {
         // metallic interaction
         
@@ -288,27 +300,94 @@ struct HitInfo {
     distance: f32,
     position: vec3<f32>,
     normal: vec3<f32>,
-    object: u32,
+    material: u32,
     front_face: bool,
 }
 
+const STACKSIZE: i32 = 32; // The max is 96, just hope we don't hit that until I can adjust the max depth
+const MAX_MODELS_PER_NODE: i32 = 8;
+
 fn raycast(ray: Ray) -> HitInfo {
     var closest = HitInfo(INF, vec3<f32>(0.0, 0.0, 0.0), vec3<f32>(0.0, 0.0, 0.0), 0, true);
-    for (var geometry_index: u32 = 0; geometry_index < arrayLength(&geometry_buffer); geometry_index++) {
-        let sphere = geometry_buffer[geometry_index];
 
-        let hit_distance = hit_sphere(sphere, ray);
-        if hit_distance != -1.0 && hit_distance > 0.0001 {
-            if hit_distance < closest.distance {
-                let hit_position = ray_at(ray, hit_distance);
-                let normal = normalize(hit_position - sphere.position);
+    var stack: array<u32, STACKSIZE> = array<u32, STACKSIZE>();
+    //stack[0] = u32(0); //-- Why does this change anything
 
-                closest = HitInfo(hit_distance, hit_position, normal, geometry_index, dot(ray.direction, normal) < 0.0);
+    var stack_index = 1;
+
+    while stack_index > 0 && stack_index < STACKSIZE {
+        stack_index--;
+        let next = stack[stack_index];
+        let bvh_node = bvh_buffer[next];
+
+        if bvh_node.model_count > 0 {
+            raycast_against_range(ray, bvh_node.index, bvh_node.model_count, &closest);
+        } else {
+            let node_1 = bvh_buffer[bvh_node.index];
+            let dst_1 = ray_bounding_dst(ray, node_1.bounds_min, node_1.bounds_max);
+            if dst_1 != INF && dst_1 < closest.distance {
+                stack[stack_index] = bvh_node.index;
+                stack_index++;
+            }
+
+            let node_2 = bvh_buffer[bvh_node.index + 1];
+            let dst_2 = ray_bounding_dst(ray, node_2.bounds_min, node_2.bounds_max);
+            if dst_2 != INF && dst_2 < closest.distance {
+                stack[stack_index] = bvh_node.index + 1;
+                stack_index++;
             }
         }
     }
 
     return closest;
+}
+
+//let first_child = bvh_buffer[bvh_node.index];
+//let second_child = bvh_buffer[bvh_node.index + 1];
+//
+//let first_dst = ray_bounding_dst(ray, first_child.bounds_min, first_child.bounds_max);
+//let second_dst = ray_bounding_dst(ray, second_child.bounds_min, second_child.bounds_max);
+//
+//var near_idx: u32;
+//var far_idx: u32;
+//var dst_near: f32;
+//var dst_far: f32;
+//if first_dst <= second_dst {
+//    near_idx = bvh_node.index;
+//    dst_near = first_dst;
+//    far_idx = bvh_node.index + 1;
+//    dst_far = second_dst;
+//} else {
+//    near_idx = bvh_node.index + 1;
+//    dst_near = second_dst;
+//    far_idx = bvh_node.index;
+//    dst_far = first_dst;
+//}
+//
+//if dst_far < closest.distance {
+//    stack[stack_index] = far_idx;
+//    stack_index++;
+//}
+//
+//if dst_near < closest.distance {
+//    stack[stack_index] = near_idx;
+//    stack_index++;
+//}
+
+fn raycast_against_range(ray: Ray, start_index: u32, amount: u32, closest: ptr<function, HitInfo>) {
+    for (var model_index: u32 = start_index; model_index < start_index + amount; model_index++) {
+        let model = model_buffer[model_index];
+
+        let hit_distance = hit_sphere(model, ray);
+        if hit_distance != -1.0 && hit_distance > 0.001 {
+            if hit_distance < (*closest).distance {
+                let hit_position = ray_at(ray, hit_distance);
+                let normal = normalize(hit_position - model.position);
+
+                *closest = HitInfo(hit_distance, hit_position, normal, model.material_id, dot(ray.direction, normal) < 0.0);
+            }
+        }
+    }
 }
 
 fn background_gradient(ray: Ray) -> vec3<f32> {
@@ -318,7 +397,7 @@ fn background_gradient(ray: Ray) -> vec3<f32> {
     return color;
 }
 
-fn hit_sphere(sphere: Sphere, ray: Ray) -> f32 {
+fn hit_sphere(sphere: Model, ray: Ray) -> f32 {
     let oc: vec3<f32> = sphere.position - ray.origin;
     let a = dot(ray.direction, ray.direction);
     let h = dot(ray.direction, oc);
@@ -331,6 +410,21 @@ fn hit_sphere(sphere: Sphere, ray: Ray) -> f32 {
 
     return (h - sqrt(discriminant)) / a;
 }
+
+// https://tavianator.com/2011/ray_box.html
+fn ray_bounding_dst(ray: Ray, box_min: vec3<f32>, box_max: vec3<f32>) -> f32 {
+    let t_min = (box_min - ray.origin) * (1.0 / ray.direction);
+    let t_max = (box_max - ray.origin) * (1.0 / ray.direction);
+    let t1 = min(t_min, t_max);
+    let t2 = max(t_min, t_max);
+    let t_near = max(max(t1.x, t1.y), t1.z);
+    let t_far = min(min(t2.x, t2.y), t2.z);
+
+    let hit = t_far >= t_near && t_far > 0.0;
+    let dst = select(INF, select(0.0, t_near, t_near > 0.0), hit);
+    return dst;
+}
+
 
 fn reflect(vector: vec3<f32>, normal: vec3<f32>) -> vec3<f32> {
     return vector - 2 * dot(vector, normal) * normal;

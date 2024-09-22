@@ -17,7 +17,18 @@ use raytracing::{RaytracePlugin, RaytracedCamera, RaytracedSphere, Raytracing};
 mod raytracing;
 
 // NOTE: Depth blending still doesnt work properly
-
+/*
+Vulkan backend for easier renderdoc investigation:
+.set(bevy::render::RenderPlugin {
+                render_creation: bevy::render::settings::RenderCreation::Automatic(
+                    bevy::render::settings::WgpuSettings {
+                        backends: Some(bevy::render::settings::Backends::VULKAN),
+                        ..default()
+                    },
+                ),
+                ..default()
+            })
+*/
 fn main() {
     App::new()
         .add_plugins((
@@ -113,7 +124,7 @@ fn setup(
                     });
                     commands.spawn((
                         PbrBundle {
-                            mesh: meshes.add(Sphere::new(0.2)),
+                            mesh: meshes.add(Sphere::new(1.0)),
                             material: sphere_material,
                             transform: center,
                             visibility: Visibility::Hidden,
@@ -135,7 +146,7 @@ fn setup(
                     });
                     commands.spawn((
                         PbrBundle {
-                            mesh: meshes.add(Sphere::new(0.2)),
+                            mesh: meshes.add(Sphere::new(1.0)),
                             material: sphere_material,
                             transform: center,
                             visibility: Visibility::Hidden,
@@ -155,7 +166,7 @@ fn setup(
                     });
                     commands.spawn((
                         PbrBundle {
-                            mesh: meshes.add(Sphere::new(0.2)),
+                            mesh: meshes.add(Sphere::new(1.0)),
                             material: sphere_material,
                             transform: center,
                             visibility: Visibility::Hidden,

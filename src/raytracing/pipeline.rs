@@ -22,7 +22,7 @@ use bevy::{
 };
 
 use super::extract::{
-    CameraExtract, GeometryBuffer, MaterialBuffer, RaytraceLevelExtract, WindowExtract,
+    BVHBuffer, CameraExtract, MaterialBuffer, ModelBuffer, RaytraceLevelExtract, WindowExtract,
 };
 // The post process node used for the render graph
 #[derive(Default)]
@@ -114,8 +114,8 @@ impl ViewNode for RayTracingNode {
             return Ok(());
         };
 
-        let geometry = world.resource::<GeometryBuffer>();
-        let mut geometry_buffer = geometry
+        let model = world.resource::<ModelBuffer>();
+        let mut model_buffer = model
             .lock()
             .expect("Could not get geometry buffer out of mutex");
 
@@ -124,19 +124,29 @@ impl ViewNode for RayTracingNode {
             .lock()
             .expect("Could not get material buffer out of mutex");
 
+        let bvh = world.resource::<BVHBuffer>();
+        let mut bvh_buffer = bvh
+            .lock()
+            .expect("Could not get material buffer out of mutex");
+
         let render_device = render_context.render_device();
         {
             let render_queue = world.resource::<RenderQueue>();
 
-            geometry_buffer.write_buffer(render_device, render_queue);
+            model_buffer.write_buffer(render_device, render_queue);
             material_buffer.write_buffer(render_device, render_queue);
+            bvh_buffer.write_buffer(render_device, render_queue);
         }
 
-        let Some(geometry_buffer_binding) = geometry_buffer.binding() else {
+        let Some(model_buffer_binding) = model_buffer.binding() else {
             return Ok(());
         };
 
         let Some(material_buffer_binding) = material_buffer.binding() else {
+            return Ok(());
+        };
+
+        let Some(bvh_buffer_binding) = bvh_buffer.binding() else {
             return Ok(());
         };
 
@@ -170,7 +180,11 @@ impl ViewNode for RayTracingNode {
         let buffer_bind_group = render_device.create_bind_group(
             "raytrace_geometry_bind_group",
             &raytrace_pipeline.buffer_layout,
-            &BindGroupEntries::sequential((geometry_buffer_binding, material_buffer_binding)),
+            &BindGroupEntries::sequential((
+                model_buffer_binding,
+                material_buffer_binding,
+                bvh_buffer_binding,
+            )),
         );
 
         // Begin the render pass
@@ -258,6 +272,12 @@ impl FromWorld for RaytracingPipeline {
                         min_binding_size: None,
                     },
                     // The material buffer
+                    BindingType::Buffer {
+                        ty: BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    // The BVH buffer
                     BindingType::Buffer {
                         ty: BufferBindingType::Storage { read_only: true },
                         has_dynamic_offset: false,
