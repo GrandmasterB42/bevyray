@@ -1,5 +1,3 @@
-use std::time::Duration;
-
 use bevy::{
     ecs::query::QueryItem,
     math::Vec3A,
@@ -11,7 +9,7 @@ use bevy::{
         Render, RenderApp, RenderSet,
     },
 };
-use obvhs::{bvh2::builder::build_bvh2, Boundable, BvhBuildParams};
+use obvhs::{ploc::build_ploc, Boundable};
 use rand::{thread_rng, Rng};
 
 use super::{RaytracedCamera, RaytracedSphere};
@@ -59,6 +57,7 @@ impl Plugin for RaytraceExtractPlugin {
 pub struct WindowExtract {
     random_seed: f32,
     height: u32,
+    _padding: Vec2,
 }
 
 impl ExtractComponent for WindowExtract {
@@ -76,6 +75,7 @@ impl ExtractComponent for WindowExtract {
         Some(WindowExtract {
             random_seed,
             height: item.physical_height(),
+            _padding: Vec2::default(),
         })
     }
 }
@@ -100,6 +100,7 @@ pub struct CameraExtract {
 #[derive(Component, Default, Clone, Copy, ShaderType)]
 pub struct RaytraceLevelExtract {
     level: u32,
+    _padding: Vec3,
 }
 
 // Turning the marker into something the GPU can use
@@ -149,6 +150,7 @@ impl ExtractComponent for CameraExtract {
 
         let level = RaytraceLevelExtract {
             level: camera.level as u32,
+            _padding: Vec3::default(),
         };
 
         Some((level, camera_extract))
@@ -218,8 +220,8 @@ pub struct Model {
 impl Boundable for Model {
     fn aabb(&self) -> obvhs::aabb::Aabb {
         obvhs::aabb::Aabb::new(
-            Vec3A::from(self.position) - Vec3A::splat(self.radius),
-            Vec3A::from(self.position) + Vec3A::splat(self.radius),
+            Vec3A::from(self.position) - Vec3A::splat(self.radius + 0.1),
+            Vec3A::from(self.position) + Vec3A::splat(self.radius + 0.1),
         )
     }
 }
@@ -308,21 +310,20 @@ pub fn prepare_buffers(
         });
     }
 
-    let mut _bvh_build_time = Duration::new(0, 0);
-    let config = BvhBuildParams::fast_build();
-    let bvh = build_bvh2(&all_spheres, config, &mut _bvh_build_time);
-
-    // reorder spheres according to indcies
-    for (original_index, new_index) in bvh.primitive_indices.iter().enumerate() {
-        all_spheres.swap(original_index, *new_index as usize);
-    }
+    let aabbs = all_spheres.iter().map(Boundable::aabb).collect::<Vec<_>>();
+    let bvh = build_ploc::<24>(
+        &aabbs,
+        (0u32..(all_spheres.len() as u32)).collect::<Vec<_>>(),
+        obvhs::ploc::SortPrecision::U64,
+        0,
+    );
 
     let bvh_nodes = bvh
         .nodes
         .into_iter()
         .map(|node| BVHNode {
-            bounds_max: node.aabb.min.into(),
-            bounds_min: node.aabb.max.into(),
+            bounds_min: node.aabb.min.into(),
+            bounds_max: node.aabb.max.into(),
             index: node.first_index,
             model_count: node.prim_count,
         })

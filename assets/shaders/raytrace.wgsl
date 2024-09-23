@@ -29,6 +29,7 @@
 @group(0) @binding(4) var<uniform> settings: RaytraceLevel;
 struct RaytraceLevel {
     level: u32,
+    _padding: vec3<f32>,
 }
 @group(0) @binding(5) var<uniform> camera: Camera;
 struct Camera {
@@ -49,6 +50,7 @@ struct Camera {
 struct Window {
     random_seed: f32,
     height: u32,
+    _padding: vec2<f32>,
 }
 
 @group(1) @binding(0) var<storage, read> model_buffer: array<Model>;
@@ -311,7 +313,6 @@ fn raycast(ray: Ray) -> HitInfo {
     var closest = HitInfo(INF, vec3<f32>(0.0, 0.0, 0.0), vec3<f32>(0.0, 0.0, 0.0), 0, true);
 
     var stack: array<u32, STACKSIZE> = array<u32, STACKSIZE>();
-    //stack[0] = u32(0); //-- Why does this change anything
 
     var stack_index = 1;
 
@@ -424,6 +425,32 @@ fn ray_bounding_dst(ray: Ray, box_min: vec3<f32>, box_max: vec3<f32>) -> f32 {
     let dst = select(INF, select(0.0, t_near, t_near > 0.0), hit);
     return dst;
 }
+
+
+// https://tavianator.com/2022/ray_box_boundary.html
+//fn ray_bounding_dst(ray: Ray, box_min: vec3<f32>, box_max: vec3<f32>) -> f32 {
+//    var tmin: f32 = 0.0;
+//    var tmax: f32 = INF;
+//
+//    let ray_dir_inv: vec3<f32> = (1.0 / ray.direction);
+//    let ray_origin: vec3<f32> = ray.origin;
+//
+//    for (var d: i32 = 0; d < 3; d = d + 1) {
+//        var bmin: f32;
+//        if ray_dir_inv[d] < 0.0 { bmin = box_max[d]; } else { bmin = box_min[d]; };
+//
+//        var bmax: f32;
+//        if ray_dir_inv[d] < 0.0 { bmax = box_min[d]; } else { bmax = box_max[d]; };
+//
+//        let dmin: f32 = (bmin - ray_origin[d]) * ray_dir_inv[d];
+//        let dmax: f32 = (bmax - ray_origin[d]) * ray_dir_inv[d];
+//
+//        tmin = max(dmin, tmin);
+//        tmax = min(dmax, tmax);
+//    }
+//    if tmin < tmax { return tmin; } else { return INF; };
+//}
+
 
 
 fn reflect(vector: vec3<f32>, normal: vec3<f32>) -> vec3<f32> {
