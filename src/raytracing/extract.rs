@@ -19,7 +19,7 @@ pub struct RaytraceExtractPlugin;
 impl Plugin for RaytraceExtractPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((
-            // The settings will be a component that lives in the main world but will
+            // The camera will be a component that lives in the main world but will
             // be extracted to the render world every frame.
             // This makes it possible to control the effect from the main world.
             // This plugin will take care of extracting it automatically.
@@ -309,6 +309,8 @@ pub fn prepare_buffers(
             material_id: index as u32,
         });
     }
+
+    // TODO: Look into optimizer/presorting/switching algorithm and what these limits are
 
     let aabbs = all_spheres.iter().map(Boundable::aabb).collect::<Vec<_>>();
     let bvh = build_ploc::<24>(

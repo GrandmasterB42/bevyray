@@ -88,6 +88,8 @@ struct BVHNode {
 
 var<private> rng_state: u32;
 
+// TODO: Investigate Performance of distance based insertion and other box distance function
+
 @fragment
 fn fragment(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
     rng_state = u32((window.random_seed * 10000.0) * (in.uv.x * 402.0) * (in.uv.y * 31.5)) ;
@@ -186,8 +188,6 @@ fn raytrace(base_ray: Ray, state: ptr<private, u32>) -> RaytraceResult {
     var bounce_count: u32 = 0;
     for (; bounce_count <= camera.bounce_count; bounce_count++) {
         let hit = raycast(ray);
-        //var hit = HitInfo(INF, vec3<f32>(0.0, 0.0, 0.0), vec3<f32>(0.0, 0.0, 0.0), 0, true);
-        //raycast_against_range(ray, u32(0), arrayLength(&model_buffer), &hit);
 
         // Setting the depth for depth buffer comparison, this might have to be a early return at some point
         if bounce_count == 0 {
@@ -306,7 +306,8 @@ struct HitInfo {
     front_face: bool,
 }
 
-const STACKSIZE: i32 = 32; // The max is 96, just hope we don't hit that until I can adjust the max depth
+// These parameters are just random guesses, investigate what the algorithm actually does
+const STACKSIZE: i32 = 32;
 const MAX_MODELS_PER_NODE: i32 = 8;
 
 fn raycast(ray: Ray) -> HitInfo {
@@ -324,6 +325,7 @@ fn raycast(ray: Ray) -> HitInfo {
         if bvh_node.model_count > 0 {
             raycast_against_range(ray, bvh_node.index, bvh_node.model_count, &closest);
         } else {
+            // TODO: Consider distance based insertion
             let node_1 = bvh_buffer[bvh_node.index];
             let dst_1 = ray_bounding_dst(ray, node_1.bounds_min, node_1.bounds_max);
             if dst_1 != INF && dst_1 < closest.distance {
@@ -342,38 +344,6 @@ fn raycast(ray: Ray) -> HitInfo {
 
     return closest;
 }
-
-//let first_child = bvh_buffer[bvh_node.index];
-//let second_child = bvh_buffer[bvh_node.index + 1];
-//
-//let first_dst = ray_bounding_dst(ray, first_child.bounds_min, first_child.bounds_max);
-//let second_dst = ray_bounding_dst(ray, second_child.bounds_min, second_child.bounds_max);
-//
-//var near_idx: u32;
-//var far_idx: u32;
-//var dst_near: f32;
-//var dst_far: f32;
-//if first_dst <= second_dst {
-//    near_idx = bvh_node.index;
-//    dst_near = first_dst;
-//    far_idx = bvh_node.index + 1;
-//    dst_far = second_dst;
-//} else {
-//    near_idx = bvh_node.index + 1;
-//    dst_near = second_dst;
-//    far_idx = bvh_node.index;
-//    dst_far = first_dst;
-//}
-//
-//if dst_far < closest.distance {
-//    stack[stack_index] = far_idx;
-//    stack_index++;
-//}
-//
-//if dst_near < closest.distance {
-//    stack[stack_index] = near_idx;
-//    stack_index++;
-//}
 
 fn raycast_against_range(ray: Ray, start_index: u32, amount: u32, closest: ptr<function, HitInfo>) {
     for (var model_index: u32 = start_index; model_index < start_index + amount; model_index++) {
@@ -412,7 +382,8 @@ fn hit_sphere(sphere: Model, ray: Ray) -> f32 {
     return (h - sqrt(discriminant)) / a;
 }
 
-// https://tavianator.com/2011/ray_box.html
+// TODO: Look into other algorithms / pre-computing the inverse of the direction
+// https://tavianator.com/2011/ray_box.html (There is also a newer version)
 fn ray_bounding_dst(ray: Ray, box_min: vec3<f32>, box_max: vec3<f32>) -> f32 {
     let t_min = (box_min - ray.origin) * (1.0 / ray.direction);
     let t_max = (box_max - ray.origin) * (1.0 / ray.direction);
@@ -425,33 +396,6 @@ fn ray_bounding_dst(ray: Ray, box_min: vec3<f32>, box_max: vec3<f32>) -> f32 {
     let dst = select(INF, select(0.0, t_near, t_near > 0.0), hit);
     return dst;
 }
-
-
-// https://tavianator.com/2022/ray_box_boundary.html
-//fn ray_bounding_dst(ray: Ray, box_min: vec3<f32>, box_max: vec3<f32>) -> f32 {
-//    var tmin: f32 = 0.0;
-//    var tmax: f32 = INF;
-//
-//    let ray_dir_inv: vec3<f32> = (1.0 / ray.direction);
-//    let ray_origin: vec3<f32> = ray.origin;
-//
-//    for (var d: i32 = 0; d < 3; d = d + 1) {
-//        var bmin: f32;
-//        if ray_dir_inv[d] < 0.0 { bmin = box_max[d]; } else { bmin = box_min[d]; };
-//
-//        var bmax: f32;
-//        if ray_dir_inv[d] < 0.0 { bmax = box_min[d]; } else { bmax = box_max[d]; };
-//
-//        let dmin: f32 = (bmin - ray_origin[d]) * ray_dir_inv[d];
-//        let dmax: f32 = (bmax - ray_origin[d]) * ray_dir_inv[d];
-//
-//        tmin = max(dmin, tmin);
-//        tmax = min(dmax, tmax);
-//    }
-//    if tmin < tmax { return tmin; } else { return INF; };
-//}
-
-
 
 fn reflect(vector: vec3<f32>, normal: vec3<f32>) -> vec3<f32> {
     return vector - 2 * dot(vector, normal) * normal;
