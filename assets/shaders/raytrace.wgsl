@@ -29,6 +29,7 @@
 @group(0) @binding(4) var<uniform> settings: RaytraceLevel;
 struct RaytraceLevel {
     level: u32,
+    _padding: vec3<f32>,
 }
 @group(0) @binding(5) var<uniform> camera: Camera;
 struct Camera {
@@ -49,10 +50,11 @@ struct Camera {
 struct Window {
     random_seed: f32,
     height: u32,
+    _padding: vec2<f32>,
 }
 
-@group(1) @binding(0) var<storage, read> geometry_buffer: array<Sphere>;
-struct Sphere {
+@group(1) @binding(0) var<storage, read> model_buffer: array<Model>;
+struct Model {
     position: vec3<f32>,
     radius: f32,
     material_id: u32,
@@ -74,7 +76,19 @@ struct Material {
     specular_transmission: f32
 }
 
+@group(1) @binding(2) var<storage, read> bvh_buffer: array<BVHNode>;
+struct BVHNode {
+    bounds_min: vec3<f32>,
+    bounds_max: vec3<f32>,
+    // is the model_index if it is a leaf node (model_count > 0)
+    // otherwise the first child index (second child directly after that
+    index: u32,
+    model_count: u32,
+}
+
 var<private> rng_state: u32;
+
+// TODO: Investigate Performance of distance based insertion and other box distance function
 
 @fragment
 fn fragment(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
@@ -186,10 +200,8 @@ fn raytrace(base_ray: Ray, state: ptr<private, u32>) -> RaytraceResult {
             break;
         }
 
-        let material = material_buffer[hit.object];
-
         var attenuation: vec3<f32>;
-        let absorbed = scatter(material, &ray, &attenuation, hit, state);
+        let absorbed = scatter(&ray, &attenuation, hit, state);
 
         // rays getting absorbed
         if absorbed {
@@ -216,7 +228,9 @@ fn linear_to_gamma_Vec3(in: vec3<f32>) -> vec3<f32> {
 }
 
 // returns wether the ray was absorbed
-fn scatter(material: Material, scattered: ptr<function, Ray>, attenuation: ptr<function, vec3<f32>>, hit: HitInfo, state: ptr<private, u32>) -> bool {
+fn scatter(scattered: ptr<function, Ray>, attenuation: ptr<function, vec3<f32>>, hit: HitInfo, state: ptr<private, u32>) -> bool {
+    let material = material_buffer[hit.material];
+
     if rngNextFloat(state) < material.metallic {
         // metallic interaction
         
@@ -288,27 +302,63 @@ struct HitInfo {
     distance: f32,
     position: vec3<f32>,
     normal: vec3<f32>,
-    object: u32,
+    material: u32,
     front_face: bool,
 }
 
+// These parameters are just random guesses, investigate what the algorithm actually does
+const STACKSIZE: i32 = 32;
+const MAX_MODELS_PER_NODE: i32 = 8;
+
 fn raycast(ray: Ray) -> HitInfo {
     var closest = HitInfo(INF, vec3<f32>(0.0, 0.0, 0.0), vec3<f32>(0.0, 0.0, 0.0), 0, true);
-    for (var geometry_index: u32 = 0; geometry_index < arrayLength(&geometry_buffer); geometry_index++) {
-        let sphere = geometry_buffer[geometry_index];
 
-        let hit_distance = hit_sphere(sphere, ray);
-        if hit_distance != -1.0 && hit_distance > 0.0001 {
-            if hit_distance < closest.distance {
-                let hit_position = ray_at(ray, hit_distance);
-                let normal = normalize(hit_position - sphere.position);
+    var stack: array<u32, STACKSIZE> = array<u32, STACKSIZE>();
 
-                closest = HitInfo(hit_distance, hit_position, normal, geometry_index, dot(ray.direction, normal) < 0.0);
+    var stack_index = 1;
+
+    while stack_index > 0 && stack_index < STACKSIZE {
+        stack_index--;
+        let next = stack[stack_index];
+        let bvh_node = bvh_buffer[next];
+
+        if bvh_node.model_count > 0 {
+            raycast_against_range(ray, bvh_node.index, bvh_node.model_count, &closest);
+        } else {
+            // TODO: Consider distance based insertion
+            let node_1 = bvh_buffer[bvh_node.index];
+            let dst_1 = ray_bounding_dst(ray, node_1.bounds_min, node_1.bounds_max);
+            if dst_1 != INF && dst_1 < closest.distance {
+                stack[stack_index] = bvh_node.index;
+                stack_index++;
+            }
+
+            let node_2 = bvh_buffer[bvh_node.index + 1];
+            let dst_2 = ray_bounding_dst(ray, node_2.bounds_min, node_2.bounds_max);
+            if dst_2 != INF && dst_2 < closest.distance {
+                stack[stack_index] = bvh_node.index + 1;
+                stack_index++;
             }
         }
     }
 
     return closest;
+}
+
+fn raycast_against_range(ray: Ray, start_index: u32, amount: u32, closest: ptr<function, HitInfo>) {
+    for (var model_index: u32 = start_index; model_index < start_index + amount; model_index++) {
+        let model = model_buffer[model_index];
+
+        let hit_distance = hit_sphere(model, ray);
+        if hit_distance != -1.0 && hit_distance > 0.001 {
+            if hit_distance < (*closest).distance {
+                let hit_position = ray_at(ray, hit_distance);
+                let normal = normalize(hit_position - model.position);
+
+                *closest = HitInfo(hit_distance, hit_position, normal, model.material_id, dot(ray.direction, normal) < 0.0);
+            }
+        }
+    }
 }
 
 fn background_gradient(ray: Ray) -> vec3<f32> {
@@ -318,7 +368,7 @@ fn background_gradient(ray: Ray) -> vec3<f32> {
     return color;
 }
 
-fn hit_sphere(sphere: Sphere, ray: Ray) -> f32 {
+fn hit_sphere(sphere: Model, ray: Ray) -> f32 {
     let oc: vec3<f32> = sphere.position - ray.origin;
     let a = dot(ray.direction, ray.direction);
     let h = dot(ray.direction, oc);
@@ -330,6 +380,21 @@ fn hit_sphere(sphere: Sphere, ray: Ray) -> f32 {
     }
 
     return (h - sqrt(discriminant)) / a;
+}
+
+// TODO: Look into other algorithms / pre-computing the inverse of the direction
+// https://tavianator.com/2011/ray_box.html (There is also a newer version)
+fn ray_bounding_dst(ray: Ray, box_min: vec3<f32>, box_max: vec3<f32>) -> f32 {
+    let t_min = (box_min - ray.origin) * (1.0 / ray.direction);
+    let t_max = (box_max - ray.origin) * (1.0 / ray.direction);
+    let t1 = min(t_min, t_max);
+    let t2 = max(t_min, t_max);
+    let t_near = max(max(t1.x, t1.y), t1.z);
+    let t_far = min(min(t2.x, t2.y), t2.z);
+
+    let hit = t_far >= t_near && t_far > 0.0;
+    let dst = select(INF, select(0.0, t_near, t_near > 0.0), hit);
+    return dst;
 }
 
 fn reflect(vector: vec3<f32>, normal: vec3<f32>) -> vec3<f32> {
