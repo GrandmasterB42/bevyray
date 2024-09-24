@@ -91,7 +91,7 @@ fn setup(
     });
     commands.spawn((
         PbrBundle {
-            mesh: meshes.add(Sphere::new(1000.0)),
+            mesh: meshes.add(Sphere::new(1.0)),
             material: ground_material,
             transform: Transform::from_xyz(0.0, -1000.0, 0.0),
             visibility: Visibility::Hidden,
